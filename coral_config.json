@@ -7,8 +7,8 @@
   },
   "embedding": {
     "embedder": "sentence-transformers",
-    "model_name": "sentence-transformers/all-MiniLM-L6-v2",
-    "dim": 384,
+    "model_name": "BAAI/bge-small-zh-v1.5",
+    "dim": 512,
     "normalize": true
   },
   "memory": {

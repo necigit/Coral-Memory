@@ -15,7 +15,8 @@ ThreeDogCoral（三狗珊瑚）—— 动态、可生长的记忆缓存系统
 
 1. 存储升级
    - 保留热 / 温 / 冷三级文本存储；
-   - 每条记忆额外生成 384 维向量（本地 sentence-transformers/all-MiniLM-L6-v2），
+   - 每条记忆额外生成语义向量（默认 sentence-transformers/all-MiniLM-L6-v2 384 维，
+     可配置为 BAAI/bge-small-zh-v1.5 512 维，见 coral_config.json），
      向量独立存为 .npy 文件（+ 一个 id 索引 JSON），与记忆数据并行维护；
    - 若环境未安装 sentence-transformers，自动降级为确定性的哈希嵌入（可配置）。
 
@@ -856,7 +857,7 @@ class ThreeDogCoral:
     def disk_usage(self) -> Dict[str, Any]:
         """磁盘占用明细（warm/cold/向量/索引）+ 配额比例，供告警与体检。
 
-        注意：向量字节用"投影值"（内存中条数 × 384×4 字节），
+        注意：向量字节用"投影值"（内存中条数 × dim×4 字节），
         因为向量是节流落盘的，读磁盘文件会严重低估真实占用，
         配额保护的应是最终要写盘的量。
         """
@@ -910,7 +911,7 @@ class ThreeDogCoral:
             cold = await self._read_all_cold()
             if cold:
                 cold.sort(key=lambda m: self._heat_score(m))
-                per_item_vec = 1536.0  # 384 维 float32
+                per_item_vec = float(int(self.cfg["embedding"]["dim"]) * 4)  # float32
                 need = 0
                 freed = 0.0
                 for m in cold:
@@ -1601,7 +1602,7 @@ async def memory_search(query: str, top_k: Optional[int] = None) -> Dict[str, An
 
 @register_tool(
     name="memory_insert",
-    description="向三狗珊瑚记忆缓存插入一条记忆：自动生成 384 维向量，参与热度淘汰；相似重复自动合并。",
+    description="向三狗珊瑚记忆缓存插入一条记忆：自动生成语义向量（维度随嵌入模型配置），参与热度淘汰；相似重复自动合并。",
     parameters={
         "content": {"type": "string", "required": True, "description": "记忆内容"},
         "importance": {"type": "number", "required": False, "description": "用户显式重要性 0~1，默认 0"},

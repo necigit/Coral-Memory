@@ -114,7 +114,26 @@ H = 0.4·log2(1+c)/log2(1+scale) + 0.3·exp(-Δt/τ) + 0.3·importance
 振荡带 [hard, max] 是刻意设计：触发于 ~max，回落于 hard
 ```
 
-向量字节用**投影值**（`len(store)×384×4`）：向量是节流落盘的，读磁盘文件会低估真实占用，配额保护的是"最终要写盘的量"。
+向量字节用**投影值**（`len(store)×dim×4`，dim 为嵌入模型维度）：向量是节流落盘的，读磁盘文件会低估真实占用，配额保护的是"最终要写盘的量"。
+
+## 嵌入模型（模型不随仓库分发，按需自取）
+
+| 模型 | 维度 | 中文语义 | 说明 |
+|---|---|---|---|
+| `sentence-transformers/all-MiniLM-L6-v2`（默认） | 384 | 一般 | 小快；纯本地 |
+| `BAAI/bge-small-zh-v1.5`（推荐中文） | 512 | 明显更准 | 首次运行自动从 HuggingFace 下载（~95MB，缓存于用户目录 `.cache/huggingface`），**不入仓库** |
+
+**指路**：[bge-small-zh-v1.5 on HuggingFace](https://huggingface.co/BAAI/bge-small-zh-v1.5) · [all-MiniLM-L6-v2](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2)
+
+配置：`coral_config.json` 的 `embedding.model_name` / `embedding.dim` 两处，改完重启服务。
+
+**换模型后必须重建向量**（旧维度向量与新维度不匹配会自动丢弃，检索会失去向量分）：
+
+```bash
+# 1. 先停掉正在运行的 coral 进程（DSH 会自动重连）
+# 2. 修改 coral_config.json 的 model_name / dim
+python migrate_bge.py   # 修订+重嵌入+重建向量区+检索验证，一步到位
+```
 
 ## 存储格式与持久化语义
 
