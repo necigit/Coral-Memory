@@ -5,11 +5,11 @@
 
 ---
 
-## 作者 @Ne
+## Author — Mr. Code Muggle (@Ne)
 
-hi guys，我做了个有趣的东西拿出来和朋友们玩玩——可以修改、二次开发和分发，但最好提一下我（笑）。
-
-致敬所有开源者 🌱
+Mr. Code Muggle — hi guys, I made something fun to play with: fork it, break it, rebuild it — just maybe mention me (lol).
+The coral remembers what I can't. Questions? 📮 751286928@qq.com
+Shoutout to every open-source maker out there 🌱
 
 ---
 
