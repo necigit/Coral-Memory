@@ -22,9 +22,7 @@ mcp_*.txt
 mcp_*.log
 
 # 开发配套（本地保留，不上 GitHub —— 仓库只追踪最小可用面）
-benchmarks/
-tests/
-stress/
+# 注：benchmarks/、tests/、stress/ 已发布——README 里的性能数字必须可复现
 examples/
 legacy/
 DEVLOG.md
