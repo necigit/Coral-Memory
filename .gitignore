@@ -20,7 +20,7 @@ test_report.json
 assistant_backend.py
 index.html
 *.bat
-{meta['anchor_snippet']}.txt
+*anchor_snippet*
 chat_history_default.json
 heat_memory.json
 cold_memory.json
