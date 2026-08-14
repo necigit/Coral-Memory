@@ -9,7 +9,7 @@ description = "A heat-aware persistent memory layer for LLM agents — three-tie
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-authors = [{ name = "Mr. Code Muggle (@Ne)" }]
+authors = [{ name = "Mr. Code Muggle (@Ne)", email = "751286928@qq.com" }]
 keywords = ["memory", "agent", "llm", "rag", "cache", "embedding", "ds-harness"]
 classifiers = [
     "Programming Language :: Python :: 3",

@@ -155,28 +155,41 @@ async def main():
 asyncio.run(main())
 ```
 
-## 自己装上用（3 步，实测链路）
+## 自己装上用（DSH Harness，推荐 MCP 方式，实测链路）
 
 ```bash
-# 1. 装包（含 coral-sidecar 命令）
-pip install coral-memory            # 或本地: pip install dist\coral_memory-0.1.0-py3-none-any.whl
+# 0. 前置：Python 能 import three_dog_coral（本仓库目录即可），无需额外依赖
+#    （coral_mcp_server.py 手写 MCP stdio 协议，不依赖 pip mcp 包）
 
-# 2. 起 Sidecar（把 @register_tool 工具桥接成 HTTP 服务，Ctrl+C 退出）
-coral-sidecar --port 8765
+# 1. 编辑 DSH 配置：$DSH_HOME/profiles/<profile>/cordis.patch.yml 加一条：
+#    - id: mcp-coral
+#      name: '@deepseek-ai/dsh-mcp-client'
+#      config:
+#        serverName: coral
+#        transport: stdio
+#        command: C:/Python313/python.exe          # 改成你的 python 路径
+#        args: ['./coral_mcp_server.py']
+#        toolCallTimeoutMs: 120000                 # 首次调用要加载嵌入模型
 
-# 3. 在 DSH Harness 里让 Agent 注册插件（二选一）：
-#    a) 告诉 Agent："读 dist/coral_plugin.js，用 cordis_define 注册这个插件"
-#    b) 把 build_dsh_cordis_plugin_js("http://127.0.0.1:8765/rpc") 的输出直接喂给 cordis_define
-#    注册后 Agent 就能直接调 memory_search / memory_insert 两个工具
+# 2. DSH 对 cordis.patch.yml 有 HMR：保存即生效，无需重启
+# 3. 开新会话，Agent 直接获得两个工具：
+#    mcp__coral__memory_search / mcp__coral__memory_insert
 ```
 
-也可以不用 DSH，任何前端都能 POST 到 Sidecar：
+不用 DSH 也可以：任何 MCP 客户端（Claude Desktop 等）都能以 stdio 方式连接
+`coral_mcp_server.py`，或 POST 到 Sidecar：
 
 ```bash
 curl -X POST http://127.0.0.1:8765/rpc \
   -H "content-type: application/json" \
   -d '{"tool":"memory_insert","args":{"content":"你好珊瑚","importance":0.5}}'
 ```
+
+> 关于 `cordis_define`：那是 `@deepseek-ai/dsh-tool-cordis` 插件提供的动态注册工具，
+> 默认 web profile 没启用它。**MCP 方式是 DSH 的标准集成路径**（配置一次、HMR 生效、
+> 所有会话可用），优先用它；想用 cordis_define 需先在 cordis.patch.yml 里
+> `insert` 该插件，再让 Agent 读 `dist/coral_plugin.js` 动态注册。
+
 
 ## 配置参考（`coral_config.json`）
 
@@ -234,15 +247,26 @@ curl -X POST http://127.0.0.1:8765/rpc \
 
 ## DSH Harness 集成
 
+**推荐：MCP stdio 桥（零依赖）**
+
+```python
+# coral_mcp_server.py —— 手写 MCP stdio 协议，把 @register_tool 注册表桥给任意 MCP 客户端
+# DSH 侧：cordis.patch.yml 注册 @deepseek-ai/dsh-mcp-client（见"自己装上用"），
+#         工具以 mcp__coral__memory_search / mcp__coral__memory_insert 出现
+```
+
+**备选：HTTP Sidecar + cordis 插件 JS**
+
 ```python
 from three_dog_coral import build_dsh_cordis_plugin_js, MemoryToolSidecar
 
 js = build_dsh_cordis_plugin_js("http://127.0.0.1:8765/rpc")  # 插件源码（头部含 @Ne 水印注释）
 sidecar = MemoryToolSidecar(port=8765)
 sidecar.start()   # JS 的 execute 通过 HTTP 桥回 Python 注册表
-# 把 js 交给 Agent 的 cordis_define（或写入 cordis.yml）即可注册 memory_search / memory_insert
+# 需要 @deepseek-ai/dsh-tool-cordis 插件提供 cordis_define 才能动态注册；或用 MCP 方式更省事
 ```
 
 ## License
 
-MIT（见 [LICENSE](LICENSE)）。二次开发请在代码中保留 `__author__ = "@Ne"` 与插件水印 🌱
+MIT（见 [LICENSE](LICENSE)）。作者：Mr. Code Muggle (@Ne) · 751286928@qq.com。
+二次开发请在代码中保留 `__author__`（含 @Ne 标识）与插件水印 🌱

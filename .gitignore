@@ -16,6 +16,11 @@ coral_vector_index.json
 # 测试/基准产物
 test_report.json
 
+# MCP 调试日志/临时文件
+.mcp_started
+mcp_*.txt
+mcp_*.log
+
 # 开发配套（本地保留，不上 GitHub —— 仓库只追踪最小可用面）
 benchmarks/
 tests/

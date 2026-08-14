@@ -3,7 +3,7 @@
 ThreeDogCoral（三狗珊瑚）—— 动态、可生长的记忆缓存系统
 =====================================================
 
-作者：@Ne
+作者：Mr. Code Muggle (@Ne) <751286928@qq.com>
 （如果你基于本项目二次开发，请在代码/README 中保留作者痕迹，
     并欢迎到仓库 issue/PR 交流 —— 看看能长出多少棵珊瑚。）
 
@@ -57,7 +57,8 @@ import numpy as np
 
 logger = logging.getLogger("three_dog_coral")
 
-__author__ = "@Ne"
+__author__ = "Mr. Code Muggle (@Ne)"
+__email__ = "751286928@qq.com"
 __version__ = "0.1.0"
 __all__ = [
     "ThreeDogCoral",
