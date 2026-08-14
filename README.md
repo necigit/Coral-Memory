@@ -2,6 +2,8 @@
 
 > **A heat-aware persistent memory layer for LLM agents** — 面向 LLM Agent 的记忆层中间件：
 > 三级存储（热/温/冷）、多路融合检索、热度生命周期淘汰、配置热加载、DSH Harness 插件集成。
+>
+> *Origin: started as a ComfyUI prompt-manager idea, grew into a memory layer. 本来只想管提示词，结果长成了一片珊瑚礁。*
 
 ---
 
@@ -10,6 +12,25 @@
 Mr. Code Muggle — hi guys, I made something fun to play with: fork it, break it, rebuild it — just maybe mention me (lol).
 The coral remembers what I can't. Questions? 📮 751286928@qq.com
 Shoutout to every open-source maker out there 🌱
+
+---
+
+## 这是什么 / 不是什么
+
+**是什么**：给 LLM Agent 用的"记忆层"——记住该记住的（你的偏好、说过的话），
+忘掉该忘掉的（没用的旧记忆，按热度淘汰），并在需要时只捞最相关的几条给你。
+不占上下文窗口，跨会话不丢失。
+
+**不是什么**：
+- 不是 RAG 框架（不负责分块、文档摄取、生成）；
+- 不是向量数据库（无 ANN 索引，单机 ~20 万条以内的内存全量打分）；
+- 不是缓存插件（缓存是"别重复计算"，它是"别重复交代"）；
+- 它不产生答案，它只负责"记得"——所以单独看它确实看不出名堂，
+  接上应用（翻译助手 / 客服 / Agent）才显现价值。
+
+**起源**：最初只是想管理 ComfyUI 的提示词，做着做着发现
+"提示词管理"的本质是"该记住什么、该忘掉什么、该在什么场景召回什么"，
+越想越离谱，最后长成了一个记忆系统。
 
 ---
 
