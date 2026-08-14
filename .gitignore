@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+
+# 运行时数据（记忆缓存落盘）
+memory_data/
+coral_warm.json
+coral_cold.jsonl
+coral_vectors.npy
+coral_vector_index.json
+
+# 测试/基准产物
+test_report.json
+
+# 旧项目遗留（打包时排除）
+assistant_backend.py
+index.html
+*.bat
+{meta['anchor_snippet']}.txt
+chat_history_default.json
+heat_memory.json
+cold_memory.json

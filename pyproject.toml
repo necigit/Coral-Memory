@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "coral-memory"
+version = "0.1.0"
+description = "A heat-aware persistent memory layer for LLM agents — three-tier storage, fusion retrieval, hot-reload config, DSH cordis plugin support."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "@Ne" }]
+keywords = ["memory", "agent", "llm", "rag", "cache", "embedding", "ds-harness"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = ["numpy>=1.24"]
+
+[project.optional-dependencies]
+embed = ["sentence-transformers>=2.2.0"]   # 真实 384 维嵌入；缺失时自动降级为确定性哈希嵌入
+dev = ["pytest>=7"]
+
+[tool.setuptools]
+py-modules = ["three_dog_coral"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

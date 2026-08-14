@@ -1,0 +1,169 @@
+要求：输出 REPLACE 后的新代码块，不要输出行号标记。
+"""
+
+    comment_rules = {
+        'high': "【注释规范】高密度：每个函数必须详细 docstring，每 3 行逻辑加注释，变量类型标注。",
+        'medium': "【注释规范】中密度：公共函数加简短 docstring，复杂块前加意图注释。",
+        'low': "【注释规范】低密度：仅对外公共接口加 docstring，内部逻辑禁止废话注释。"
+    }
+
+    sys_prompt = f"""你是专业的代码修改专家，擅长 {expertise} 语言。
+{comment_rules.get(comment_level, '')}
+【输出强制约束】
+- 禁止输出任何行号标记、行号注释。
+- diff：只输出标准 Unified Diff，不输出完整源码。
+- block：只输出替换后的新代码块，基于 SEARCH 片段定位。
+- full：输出修改后的完整全部源码。
+不要多余闲聊解释，只输出对应产物。
+"""
+
+    user_content = f"""
+原始文件共 {len(original.splitlines())} 行。
+{original if strategy == 'full' else "(非full模式，不投递完整文件，依靠下面SEARCH片段定位修改)"}
+
+{anchor_context}
+
+### 修改指令
+{instruction}
+
+### 历史偏好记忆
+{memory_text}
+
+严格按照策略「{strategy}」执行输出。
+"""
+    return [
+        {"role": "system", "content": sys_prompt},
+        {"role": "user", "content": user_content}
+    ]
+
+# ============================================================
+# Web 服务
+# ============================================================
+def start_web_server():
+    if not HAS_FLASK:
+        print("缺少依赖：pip install flask")
+        sys.exit(1)
+
+    app = Flask(__name__)
+    store = MemoryStore()
+    hot_dog = HotDog(store)
+    cold_dog = ColdDog(store)
+    hot_dog.start()
+    cold_dog.start()
+
+    html_path = Path(__file__).parent / "index.html"
+    if html_path.exists():
+        page_html = html_path.read_text(encoding="utf-8")
+    else:
+        page_html = "<h3>未找到 index.html，请放在同目录下</h3>"
+
+    @app.route("/")
+    def index():
+        return page_html
+
+    @app.route("/api/run", methods=["POST"])
+    def api_run():
+        data = request.get_json()
+        instruction = data.get("instruction", "").strip()
+        if not instruction:
+            return jsonify({"result": "指令不能为空"})
+
+        hot_dog.tick(instruction)
+        memories = store.query_heat(instruction, top_k=MAX_ACTIVATE_MEMORY)
+        memory_text = "\n".join(f"- {m.content}" for m in memories) if memories else "无相关历史"
+
+        messages = [
+            {"role": "system", "content": "你是代码修改助手，直接输出代码，不要多余闲聊。"},
+            {"role": "user", "content": f"{instruction}\n历史记忆：{memory_text}"}
+        ]
+        try:
+            raw = call_llm(messages)
+        except Exception as e:
+            return jsonify({"result": f"请求异常: {str(e)}"})
+
+        result = strip_markdown_codeblock(raw)
+        store.add(f"web调用：{instruction}")
+        return jsonify({"result": result})
+
+    print("=" * 50)
+    print("Web 服务已启动：http://127.0.0.1:5000")
+    print("前端页面：同目录 index.html")
+    print("=" * 50)
+    app.run(host="127.0.0.1", port=5000, debug=False)
+
+# ============================================================
+# 命令行入口
+# ============================================================
+def cli_main():
+    parser = argparse.ArgumentParser(description="结对编程助手")
+    parser.add_argument("--file", help="目标文件路径（仅读取）")
+    parser.add_argument("--instruction", help="修改指令")
+    parser.add_argument("--mode", choices=['auto', 'diff', 'block', 'full'], default='auto')
+    parser.add_argument("--comment", choices=['high', 'medium', 'low'], default='')
+    parser.add_argument("--web", action="store_true", help="启动Web前端服务")
+    args = parser.parse_args()
+
+    if args.web:
+        start_web_server()
+        return
+
+    if not args.file or not args.instruction:
+        parser.print_help()
+        sys.exit(1)
+
+    file_path = Path(args.file)
+    if not file_path.exists():
+        print(f"❌ 文件不存在: {file_path}")
+        sys.exit(1)
+    original = file_path.read_text(encoding="utf-8")
+
+    store = MemoryStore()
+    hot = HotDog(store)
+    cold = ColdDog(store)
+    hot.start()
+    cold.start()
+    hot.tick(args.instruction)
+
+    memories = store.query_heat(args.instruction, top_k=MAX_ACTIVATE_MEMORY)
+    memory_text = "\n".join(f"- {m.content}" for m in memories) if memories else "无相关历史"
+
+    expertise = detect_expertise(args.file, args.instruction)
+    comment_level = detect_comment_level(args.instruction, args.comment)
+
+    if args.mode != 'auto':
+        strategy = args.mode
+        meta = {'reason': f'用户强制 {args.mode}'}
+    else:
+        strategy, meta = analyze_modification_scope(original, args.instruction)
+
+    print(f"\n🧠 领域: {expertise} | 📝 注释: {comment_level} | 🎯 策略: {strategy} ({meta.get('reason', '')})")
+    print("⚠️ 不会自动修改源文件，结果复制后手动应用\n")
+
+    messages = build_prompt(original, args.instruction, strategy, meta, expertise, comment_level, memory_text)
+
+    print("⏳ 正在请求 LLM...\n")
+    try:
+        raw_output = call_llm(messages)
+    except Exception as e:
+        print(f"❌ {e}")
+        hot.stop()
+        cold.stop()
+        sys.exit(1)
+
+    final_out = strip_markdown_codeblock(raw_output)
+
+    print("=" * 70)
+    print("📤 生成结果：")
+    print("=" * 70)
+    print(final_out)
+    print("=" * 70)
+
+    store.add(f"修改 {file_path.name}: {args.instruction} (策略:{strategy})")
+    hot.stop()
+    cold.stop()
+    store._save_to_disk()
+    print("\n💾 操作已写入记忆。")
+
+
+if __name__ == "__main__":
+    cli_main()

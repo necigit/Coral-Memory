@@ -1,0 +1,63 @@
+{
+  "paths": {
+    "warm_cache": "memory_data/coral_warm.json",
+    "cold_archive": "memory_data/coral_cold.jsonl",
+    "vector_store": "memory_data/coral_vectors.npy",
+    "vector_index": "memory_data/coral_vector_index.json"
+  },
+  "embedding": {
+    "embedder": "sentence-transformers",
+    "model_name": "sentence-transformers/all-MiniLM-L6-v2",
+    "dim": 384,
+    "normalize": true
+  },
+  "memory": {
+    "sim_threshold_hot": 0.7,
+    "sim_threshold_warm": 0.55,
+    "sim_threshold_cold": 0.45,
+    "hot_ttl_hours": 24,
+    "max_hot_entries": 50,
+    "max_warm_entries": 200,
+    "max_cold_entries": 1000,
+    "token_fuse_threshold": 4000,
+    "capacity_threshold": 1000,
+    "governance_headroom": 0,
+    "distill_first": true,
+    "distill_sim_threshold": 0.6,
+    "distill_min_cluster": 3,
+    "cold_scan_lines": 500
+  },
+  "retrieval": {
+    "weights": {
+      "vector": 0.6,
+      "jaccard": 0.2,
+      "time": 0.2
+    },
+    "top_k": 5,
+    "tau_days": 7.0,
+    "min_score": 0.0
+  },
+  "heat": {
+    "weights": {
+      "frequency": 0.4,
+      "recency": 0.3,
+      "importance": 0.3
+    },
+    "tau_days": 7.0,
+    "freq_scale": 10.0,
+    "cold_fold_interval_seconds": 30
+  },
+  "reload": {
+    "check_interval_seconds": 2.0
+  },
+  "parallelism": {
+    "embed_batch_window_ms": 8,
+    "vectorized_jaccard": true
+  },
+  "storage": {
+    "vector_save_interval_seconds": 5.0,
+    "max_bytes": 0,
+    "warn_ratio": 0.8,
+    "hard_ratio": 0.85
+  }
+}
