@@ -4,6 +4,12 @@
 > 三级存储（热/温/冷）、多路融合检索、热度生命周期淘汰、配置热加载、DSH Harness 插件集成。
 >
 > *Origin: started as a ComfyUI prompt-manager idea, grew into a memory layer. 本来只想管提示词，结果长成了一片珊瑚礁。*
+>
+> **EN**: Coral Memory is a heat-aware persistent memory layer for LLM agents —
+> three-tier storage (hot/warm/cold), multi-fusion retrieval, heat-based lifecycle eviction,
+> config hot-reload, and a zero-dependency MCP stdio bridge so any MCP-capable client
+> (DSH Harness, Claude Desktop, Cline, ...) gets `memory_search` / `memory_insert` tools.
+> Embedding models are fetched on first run from HuggingFace — never committed to the repo.
 
 ---
 

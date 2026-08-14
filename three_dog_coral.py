@@ -1576,7 +1576,9 @@ def get_coral(config_path: Optional[str] = None) -> ThreeDogCoral:
 
 @register_tool(
     name="memory_search",
-    description="检索三狗珊瑚记忆缓存：多路融合（向量 0.6 + 关键词 0.2 + 时间衰减 0.2），返回 Top-K 相关记忆及得分。",
+    description="检索三狗珊瑚记忆缓存 / Search the Coral memory cache："
+                "多路融合（向量 0.6 + 关键词 0.2 + 时间衰减 0.2）multi-fusion retrieval "
+                "(vector 0.6 + keyword 0.2 + recency 0.2)，返回 Top-K 相关记忆及得分 (returns Top-K relevant memories with scores).",
     parameters={
         "query": {"type": "string", "required": True, "description": "查询文本"},
         "top_k": {"type": "integer", "required": False, "description": "返回条数，默认取配置(5)"},
@@ -1602,7 +1604,9 @@ async def memory_search(query: str, top_k: Optional[int] = None) -> Dict[str, An
 
 @register_tool(
     name="memory_insert",
-    description="向三狗珊瑚记忆缓存插入一条记忆：自动生成语义向量（维度随嵌入模型配置），参与热度淘汰；相似重复自动合并。",
+    description="向三狗珊瑚记忆缓存插入一条记忆 / Insert a memory into the Coral cache："
+                "自动生成语义向量（维度随嵌入模型配置）auto-embeds with the configured model; "
+                "参与热度淘汰 heat-based eviction; 相似重复自动合并 similar repeats auto-merge.",
     parameters={
         "content": {"type": "string", "required": True, "description": "记忆内容"},
         "importance": {"type": "number", "required": False, "description": "用户显式重要性 0~1，默认 0"},
