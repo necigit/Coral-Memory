@@ -16,6 +16,14 @@ coral_vector_index.json
 # 测试/基准产物
 test_report.json
 
+# 开发配套（本地保留，不上 GitHub —— 仓库只追踪最小可用面）
+benchmarks/
+tests/
+stress/
+examples/
+legacy/
+DEVLOG.md
+
 # 旧项目遗留（打包时排除）
 assistant_backend.py
 index.html
