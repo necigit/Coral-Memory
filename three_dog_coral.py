@@ -1606,7 +1606,9 @@ async def memory_search(query: str, top_k: Optional[int] = None) -> Dict[str, An
     name="memory_insert",
     description="向脑珊瑚记忆缓存插入一条记忆 / Insert a memory into the Brain Coral cache："
                 "自动生成语义向量（维度随嵌入模型配置）auto-embeds with the configured model; "
-                "参与热度淘汰 heat-based eviction; 相似重复自动合并 similar repeats auto-merge.",
+                "参与热度淘汰 heat-based eviction; 相似重复自动合并 similar repeats auto-merge. "
+                "注意：新记忆先入内存热区（重启丢失），如需持久化请随后调用 memory_flush "
+                "(Note: new memories live in the in-memory hot zone and are lost on restart; call memory_flush to persist).",
     parameters={
         "content": {"type": "string", "required": True, "description": "记忆内容"},
         "importance": {"type": "number", "required": False, "description": "用户显式重要性 0~1，默认 0"},
@@ -1619,7 +1621,29 @@ async def memory_insert(content: str, importance: float = 0.0) -> Dict[str, Any]
         "inserted": item is not None,
         "item_id": item.item_id if item else None,
         "message": "ok" if item else "重复记忆：已合并访问统计",
+        "persisted": False,
+        "hint": "新记忆先入内存热区（重启丢失）；如需持久化请调用 memory_flush",
     }
+
+
+@register_tool(
+    name="memory_flush",
+    description="强制把脑珊瑚记忆落盘 / Force-flush the Brain Coral memory to disk："
+                "热区记忆默认只存内存（进程/重启后丢失），调用后持久化到 memory_data/（温存 + 向量）。"
+                "写重要记忆（偏好/结论/档案）后请调用它 (Persist hot-zone memories to disk; call after inserting important memories).",
+    parameters={},
+)
+async def memory_flush() -> Dict[str, Any]:
+    """把热区条目迁入温区并强制落盘——用户显式 flush = 明确要持久化这些记忆。"""
+    coral = get_coral()
+    moved = len(coral.hot_memory)
+    if moved:
+        # 热区不落盘是三级存储的设计；显式 flush 时把热区条目并入温区一起持久化
+        coral.warm_memory.extend(coral.hot_memory)
+        coral.hot_memory = []
+    await coral.flush()
+    s = coral.stats()
+    return {"flushed": True, "hot_persisted": moved, "stats": s}
 
 
 # ---------------------------------------------------------------------------

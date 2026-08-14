@@ -248,7 +248,8 @@ curl -X POST http://127.0.0.1:8765/rpc \
 | `stats` | `() → dict` | hot/warm/cold/total/vectors（O(1)） |
 | `fuse_check` | `(items) → bool` | token 熔断（沿用旧版语义） |
 | `_distill` | `(cluster) → MemoryItem \| None` | **可覆写**的 LLM 蒸馏接口，默认占位返回 None |
-| `@register_tool` | 装饰器 | 注册 `memory_search(query, top_k)` / `memory_insert(content, importance)` |
+| `@register_tool` | 装饰器 | 注册 `memory_search(query, top_k)` / `memory_insert(content, importance)` / `memory_flush()` |
+| `memory_flush` | MCP 工具 | **持久化关键**：热区记忆默认只存内存（重启丢失），写重要记忆后调它落盘（温存 + 向量） |
 | `build_dsh_cordis_plugin_js` | `(sidecar_url) → str` | 生成 DSH `harness.registerTool` 插件 JS（含 @Ne 水印） |
 | `MemoryToolSidecar` | `(host, port)` | 极简 HTTP 桥：JS `execute` → `POST /rpc` → Python 注册表 |
 | `get_coral` | `(config_path) → ThreeDogCoral` | 全局单例（与 Agent 工具共享同一份记忆） |
@@ -282,8 +283,10 @@ curl -X POST http://127.0.0.1:8765/rpc \
 ```python
 # coral_mcp_server.py —— 手写 MCP stdio 协议，把 @register_tool 注册表桥给任意 MCP 客户端
 # DSH 侧：cordis.patch.yml 注册 @deepseek-ai/dsh-mcp-client（见"自己装上用"），
-#         工具以 mcp__coral__memory_search / mcp__coral__memory_insert 出现
+#         工具以 mcp__coral__memory_search / mcp__coral__memory_insert / mcp__coral__memory_flush 出现
 ```
+
+> ⚠️ **持久化（重要）**：`memory_insert` 的新记忆先进**内存热区**——进程/重启后丢失（热区不落盘是三级存储的设计）。**写重要记忆后务必调用 `memory_flush`**（把温存 + 向量落盘到 `memory_data/`）。一条建议流程：`memory_insert(内容, importance)` → `memory_flush()`。
 
 **备选：HTTP Sidecar + cordis 插件 JS**
 
