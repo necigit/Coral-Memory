@@ -1,4 +1,4 @@
-# 三狗珊瑚 · Coral Memory
+# 脑珊瑚 · Coral Memory (Brain Coral)
 
 > **A heat-aware persistent memory layer for LLM agents** — 面向 LLM Agent 的记忆层中间件：
 > 三级存储（热/温/冷）、多路融合检索、热度生命周期淘汰、配置热加载、DSH Harness 插件集成。

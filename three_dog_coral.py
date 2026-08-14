@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-ThreeDogCoral（三狗珊瑚）—— 动态、可生长的记忆缓存系统
+ThreeDogCoral（脑珊瑚 / Brain Coral）—— 动态、可生长的记忆缓存系统
 =====================================================
 
 作者：Mr. Code Muggle (@Ne) <751286928@qq.com>
@@ -574,7 +574,7 @@ def register_tool(
 
 
 # ---------------------------------------------------------------------------
-# 三狗珊瑚主类
+# 脑珊瑚主类
 # ---------------------------------------------------------------------------
 class ThreeDogCoral:
     """动态、可生长的记忆缓存系统。
@@ -1576,7 +1576,7 @@ def get_coral(config_path: Optional[str] = None) -> ThreeDogCoral:
 
 @register_tool(
     name="memory_search",
-    description="检索三狗珊瑚记忆缓存 / Search the Coral memory cache："
+    description="检索脑珊瑚记忆缓存 / Search the Brain Coral memory cache："
                 "多路融合（向量 0.6 + 关键词 0.2 + 时间衰减 0.2）multi-fusion retrieval "
                 "(vector 0.6 + keyword 0.2 + recency 0.2)，返回 Top-K 相关记忆及得分 (returns Top-K relevant memories with scores).",
     parameters={
@@ -1604,7 +1604,7 @@ async def memory_search(query: str, top_k: Optional[int] = None) -> Dict[str, An
 
 @register_tool(
     name="memory_insert",
-    description="向三狗珊瑚记忆缓存插入一条记忆 / Insert a memory into the Coral cache："
+    description="向脑珊瑚记忆缓存插入一条记忆 / Insert a memory into the Brain Coral cache："
                 "自动生成语义向量（维度随嵌入模型配置）auto-embeds with the configured model; "
                 "参与热度淘汰 heat-based eviction; 相似重复自动合并 similar repeats auto-merge.",
     parameters={
@@ -1759,7 +1759,7 @@ class MemoryToolSidecar:
 # 便捷入口
 # ---------------------------------------------------------------------------
 async def run_demo() -> None:
-    """直接运行本文件即可体验三狗珊瑚的完整流程。"""
+    """直接运行本文件即可体验脑珊瑚的完整流程。"""
     from example_usage import main as example_main
 
     await example_main()

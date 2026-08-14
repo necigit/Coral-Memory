@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-coral-memory MCP server (author: @Ne) —— 把三狗珊瑚记忆库桥接成 MCP (Model Context Protocol) 服务器。
+coral-memory MCP server (author: @Ne) —— 把脑珊瑚记忆库桥接成 MCP (Model Context Protocol) 服务器。
 
 零依赖：手写 MCP stdio 传输（JSON-RPC 2.0 over stdin/stdout，LSP 风格 Content-Length 帧），
 无需 pip install mcp。DSH Harness 通过 @deepseek-ai/dsh-mcp-client 插件以 stdio 方式拉起本进程，
