@@ -129,6 +129,29 @@ async def main():
 asyncio.run(main())
 ```
 
+## 自己装上用（3 步，实测链路）
+
+```bash
+# 1. 装包（含 coral-sidecar 命令）
+pip install coral-memory            # 或本地: pip install dist\coral_memory-0.1.0-py3-none-any.whl
+
+# 2. 起 Sidecar（把 @register_tool 工具桥接成 HTTP 服务，Ctrl+C 退出）
+coral-sidecar --port 8765
+
+# 3. 在 DSH Harness 里让 Agent 注册插件（二选一）：
+#    a) 告诉 Agent："读 dist/coral_plugin.js，用 cordis_define 注册这个插件"
+#    b) 把 build_dsh_cordis_plugin_js("http://127.0.0.1:8765/rpc") 的输出直接喂给 cordis_define
+#    注册后 Agent 就能直接调 memory_search / memory_insert 两个工具
+```
+
+也可以不用 DSH，任何前端都能 POST 到 Sidecar：
+
+```bash
+curl -X POST http://127.0.0.1:8765/rpc \
+  -H "content-type: application/json" \
+  -d '{"tool":"memory_insert","args":{"content":"你好珊瑚","importance":0.5}}'
+```
+
 ## 配置参考（`coral_config.json`）
 
 | 段 | 关键项 | 默认 | 说明 |

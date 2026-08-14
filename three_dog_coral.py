@@ -1759,6 +1759,40 @@ async def run_demo() -> None:
     await example_main()
 
 
+def sidecar_main(
+    config_path: Optional[str] = None,
+    host: str = "127.0.0.1",
+    port: int = 8765,
+) -> None:
+    """命令行入口：启动 MemoryToolSidecar，把 @register_tool 工具桥接给 DSH 插件。
+
+    pip 安装后可用 `coral-sidecar` 直接启动；也可 `python -m three_dog_coral.sidecar`。
+    用法: coral-sidecar [--config coral_config.json] [--host 127.0.0.1] [--port 8765]
+    """
+    import argparse
+
+    parser = argparse.ArgumentParser(description="coral-memory sidecar: 桥接 @register_tool 工具给 DSH 插件")
+    parser.add_argument("--config", default=None, help="coral_config.json 路径（默认当前目录，缺失自动生成）")
+    parser.add_argument("--host", default=host)
+    parser.add_argument("--port", type=int, default=port)
+    args, _ = parser.parse_known_args()
+
+    cfg_path = args.config or config_path or os.path.join(os.getcwd(), "coral_config.json")
+    get_coral(cfg_path)  # 预热单例（缺配置自动生成默认）
+    sidecar = MemoryToolSidecar(args.host, args.port)
+    sidecar.start()
+    print(f"coral-memory sidecar 已启动: http://{args.host}:{args.port}/rpc")
+    print(f"可用工具: {', '.join(TOOL_REGISTRY)}")
+    print("把 dist/coral_plugin.js（或 build_dsh_cordis_plugin_js() 的输出）")
+    print("交给 Agent 的 cordis_define 即可注册为 DSH 工具。Ctrl+C 退出。")
+    try:
+        while True:
+            time.sleep(3600)
+    except KeyboardInterrupt:
+        sidecar.stop()
+        print("sidecar 已停止")
+
+
 if __name__ == "__main__":
     import sys
 
