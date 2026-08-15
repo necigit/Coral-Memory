@@ -43,6 +43,7 @@ ThreeDogCoral（脑珊瑚 / Brain Coral）—— 动态、可生长的记忆缓�
 from __future__ import annotations
 
 import asyncio
+import atexit
 import hashlib
 import json
 import logging
@@ -65,6 +66,7 @@ __all__ = [
     "ThreeDogCoral",
     "MemoryItem",
     "SearchHit",
+    "ThreadItem",
     "register_tool",
     "TOOL_REGISTRY",
     "memory_search",
@@ -77,6 +79,9 @@ __all__ = [
 ]
 
 DEFAULT_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "coral_config.json")
+
+# 推理线索链路落盘节流（秒）：突发批量操作合并写盘，真实聊天操作（间隔 >> 此值）仍即时落盘
+_THREADS_SAVE_DEBOUNCE = 0.25
 
 # ---------------------------------------------------------------------------
 # 默认配置（与 coral_config.json 保持一致；加载时做深合并，允许部分覆盖）
@@ -138,6 +143,12 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "max_bytes": 0,                       # 磁盘配额硬线（字节），0 = 不限制
         "warn_ratio": 0.8,                    # 占用超过 硬线×此比例 时告警
         "hard_ratio": 0.85,                   # 超硬线后按热度淘汰冷库，回落到 硬线×此比例
+    },
+    # 推理线索链路（Thread）：概括式、永不遗忘的跨聊天协作线索。
+    # 与热/温/冷记忆池完全独立：不参与热度淘汰 / 容量治理 / 磁盘配额（"永不遗忘"），
+    # 每次变更原子写盘，读取时按文件 mtime 检测外部变更（多进程/多聊天共享同一份链路）。
+    "threads": {
+        "path": "memory_data/coral_threads.json",
     },
 }
 
@@ -210,6 +221,28 @@ class SearchHit:
     def __getattr__(self, name: str) -> Any:
         # 兼容旧代码：直接把 item 的字段透传出来
         return getattr(self.item, name)
+
+
+@dataclass
+class ThreadItem:
+    """推理线索链路（Thread）：概括式、永不遗忘的跨聊天协作线索。
+
+    与普通记忆（热/温/冷池，参与热度淘汰）有本质区别：
+    - 存独立文件（coral_threads.json），每次变更原子落盘；
+    - 不参与热度淘汰 / 容量治理 / 磁盘配额 —— "永不遗忘"；
+    - 读取时按文件 mtime 检测外部变更（多个聊天进程共享同一份链路，
+      聊天 A 建的链路，聊天 B~F 立刻可见、各自推进）。
+    """
+
+    thread_id: str
+    title: str                                              # 链路名（短短语）
+    summary: str = ""                                       # 宏观路径/当前状态（几句话）
+    status: str = "active"                                  # active | interrupted | archived
+    steps: List[Dict[str, Any]] = field(default_factory=list)  # 推进记录链 {seq,text,done,at,by}
+    parent_thread_id: Optional[str] = None                  # 父链路 ID（线索链串联）
+    created_at: float = 0.0
+    updated_at: float = 0.0
+    last_advance_by: str = ""                               # 最近推进者（如 聊天B）
 
 
 # ---------------------------------------------------------------------------
@@ -597,6 +630,7 @@ class ThreeDogCoral:
         self.path_cold = paths["cold_archive"]
         self.path_vectors = paths["vector_store"]
         self.path_vector_index = paths["vector_index"]
+        self.path_threads = self.cfg.get("threads", {}).get("path", "memory_data/coral_threads.json")
 
         os.makedirs(os.path.dirname(os.path.abspath(self.path_warm)), exist_ok=True)
         os.makedirs(os.path.dirname(os.path.abspath(self.path_cold)), exist_ok=True)
@@ -639,6 +673,14 @@ class ThreeDogCoral:
 
         # 孤儿向量清理：热区不落盘，重启后其向量无主，只保留 温区+冷区 的向量
         self._prune_orphan_vectors()
+
+        # 推理线索链路（永不遗忘，独立于记忆池；启动即加载）
+        self._threads: Dict[str, ThreadItem] = {}
+        self._threads_fp: Optional[tuple] = None   # 文件指纹 (mtime, size)，检测外部变更
+        self._threads_dirty = False                # 变更未落盘标记（节流）
+        self._threads_last_save = 0.0
+        self._load_threads_sync()
+        atexit.register(self._flush_threads_atexit)
 
     # ================= 工具函数 =================
     @staticmethod
@@ -1303,11 +1345,12 @@ class ThreeDogCoral:
         self._load_warm_sync()
 
     async def flush(self) -> None:
-        """显式落盘：冷库热度增量 + 温存 + 向量（强制）。"""
+        """显式落盘：冷库热度增量 + 温存 + 向量（强制）+ 链路（强制，越过节流）。"""
         async with self._get_lock():
             await self._fold_cold_stats()
             await self._save_warm()
             self._maybe_save_vectors(force=True)
+            self._write_threads_now()
 
     # ================= 多路融合检索 =================
     async def search(self, query: str, top_k: Optional[int] = None) -> List[SearchHit]:
@@ -1540,6 +1583,368 @@ class ThreeDogCoral:
         self._clear_cold_bumps()
         return result
 
+    # ================= 推理线索链路（Thread，永不遗忘） =================
+    def _threads_file_fp(self) -> Optional[tuple]:
+        """链路文件指纹 (mtime, size)。size 参与比对：某些文件系统 mtime
+        粒度粗（同一 tick 内两次写盘 mtime 相同），而任何变更都会改文件大小。"""
+        try:
+            st = os.stat(self.path_threads)
+            return (st.st_mtime, st.st_size)
+        except OSError:
+            return None
+
+    def _load_threads_sync(self) -> None:
+        """启动/外部变更时加载链路文件。文件缺失视为空。"""
+        self._threads = {}
+        if not os.path.exists(self.path_threads):
+            self._threads_fp = None
+            return
+        try:
+            with open(self.path_threads, "r", encoding="utf-8") as f:
+                raw = json.load(f) if os.path.getsize(self.path_threads) > 0 else []
+            items = raw if isinstance(raw, list) else list(raw.values())
+            for d in items:
+                try:
+                    t = ThreadItem(**d)
+                    self._threads[t.thread_id] = t
+                except Exception:  # noqa: BLE001
+                    continue
+            self._threads_fp = self._threads_file_fp()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("链路文件加载失败（%s），从空链路开始", exc)
+
+    def _threads_changed_on_disk(self) -> bool:
+        """其它聊天进程可能改写了链路文件：指纹变了就重载（共享协作的同步机制）。"""
+        return self._threads_file_fp() != self._threads_fp
+
+    def _sync_threads(self) -> None:
+        """读/写路径先检测外部变更，保证多进程（多聊天）看到同一份链路。"""
+        if self._threads_changed_on_disk():
+            self._load_threads_sync()
+
+    def _save_threads(self) -> None:
+        """变更路径：标记脏 + 节流落盘（THREADS_SAVE_DEBOUNCE 秒内合并为一次写盘）。
+
+        突发批量操作（压测/脚本循环）不再每次全量重写文件，避免 O(n²) 落盘；
+        真实使用（聊天驱动，操作间隔 >> 250ms）下每次变更仍会立即落盘。
+        落盘兜底：flush() 强制 + 进程正常退出 atexit 强制。
+        """
+        self._threads_dirty = True
+        if time.monotonic() - self._threads_last_save >= _THREADS_SAVE_DEBOUNCE:
+            self._write_threads_now()
+
+    def _write_threads_now(self) -> None:
+        """立即原子写链路文件：tmp + os.replace（写前做一次远端合并）。
+
+        多进程（多聊天）并发写同一文件时，用锁文件（O_EXCL）串行化写者，
+        锁内合并远端步骤再写盘 —— 杜绝 Windows 上 os.replace 撞文件（WinError 32）
+        以及"后写者覆盖先写者步骤"的丢更新。
+        """
+        if not self._threads_dirty and self._threads_last_save > 0:
+            return
+        lock_path = self.path_threads + ".lock"
+        acquired = False
+        deadline = time.time() + 10.0
+        while time.time() < deadline:
+            try:
+                fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.write(fd, str(os.getpid()).encode("utf-8"))
+                os.close(fd)
+                acquired = True
+                break
+            except FileExistsError:
+                # stale 检测：锁文件超 10s 未更新 → 视为崩溃遗留，强抢
+                try:
+                    if time.time() - os.path.getmtime(lock_path) > 10:
+                        os.remove(lock_path)
+                        continue
+                except OSError:
+                    pass
+                time.sleep(0.005)
+        if not acquired:
+            logger.warning("链路写锁获取超时，本次落盘跳过（数据仍在内存，flush 或下次变更会再写）")
+            return
+        try:
+            # 写前"远端合并"：若另一个聊天进程在我们本次操作期间刚写入（指纹变了），
+            # 以远端为基底把本地多出的步骤补进去（按 seq 排序），避免后写者覆盖先写者的推进步骤。
+            # （_threads_fp 为 None 表示磁盘上还没有文件，无远端可合并）
+            if self._threads_fp is not None and self._threads_changed_on_disk():
+                try:
+                    with open(self.path_threads, "r", encoding="utf-8") as f:
+                        raw = json.load(f) if os.path.getsize(self.path_threads) > 0 else []
+                    remote = {t.thread_id: t for t in (ThreadItem(**d) for d in raw)}
+                    for tid, t in self._threads.items():
+                        rt = remote.get(tid)
+                        if rt is None or not t.steps:
+                            continue
+                        # 按 step_id 合并（旧数据无 step_id 时回退 seq|at），
+                        # 不同写者并发产生的步骤全部保留，各自内部顺序不变
+                        def _sid(s: Dict[str, Any]) -> str:
+                            return str(s.get("step_id") or f"{s.get('seq')}|{s.get('at')}")
+
+                        remote_ids = {_sid(s) for s in rt.steps}
+                        extra = [s for s in t.steps if _sid(s) not in remote_ids]
+                        if extra:
+                            t.steps = sorted(
+                                rt.steps + extra,
+                                key=lambda s: (s.get("seq", 0), s.get("at", 0.0)),
+                            )
+                except Exception as exc:  # noqa: BLE001 远端合并失败不影响写盘（last-write-wins 兜底）
+                    logger.warning("链路远端合并失败（%s），使用本地状态直接写盘", exc)
+            data = [asdict(t) for t in self._threads.values()]
+            tmp = self.path_threads + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            # 重试兜底：即使持锁，读者瞬时的读句柄也可能挡住 os.replace（WinError 32）
+            for attempt in range(8):
+                try:
+                    os.replace(tmp, self.path_threads)
+                    break
+                except PermissionError:
+                    if attempt == 7:
+                        raise
+                    time.sleep(0.01 * (attempt + 1))
+            self._threads_fp = self._threads_file_fp()
+            self._threads_last_save = time.monotonic()
+            self._threads_dirty = False
+        finally:
+            try:
+                os.remove(lock_path)
+            except OSError:
+                pass
+
+    def _flush_threads_atexit(self) -> None:
+        """进程正常退出时兜底落盘（仅当还有未落盘变更；崩溃/强杀不保证，日常退出可靠）。"""
+        if not self._threads_dirty:
+            return
+        try:
+            self._write_threads_now()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _thread_view(self, t: ThreadItem) -> Dict[str, Any]:
+        """链路的可序列化视图（给 Agent 渲染聊天内看板用）。"""
+        return {
+            "thread_id": t.thread_id,
+            "title": t.title,
+            "summary": t.summary,
+            "status": t.status,
+            "parent_thread_id": t.parent_thread_id,
+            "last_advance_by": t.last_advance_by,
+            "created_at": round(t.created_at, 3),
+            "updated_at": round(t.updated_at, 3),
+            "step_count": len(t.steps),
+            "steps": [
+                {
+                    "step_id": s.get("step_id"),
+                    "seq": s.get("seq"),
+                    "text": s.get("text", ""),
+                    "done": bool(s.get("done")),
+                    "by": s.get("by", ""),
+                    "at": round(float(s.get("at", 0.0)), 3),
+                }
+                for s in t.steps
+            ],
+        }
+
+    async def thread_create(
+        self,
+        title: str,
+        summary: str = "",
+        parent_thread_id: Optional[str] = None,
+        by: str = "",
+    ) -> ThreadItem:
+        """创建一条推理线索链路（永不遗忘，不参与热度淘汰）。返回新链路。"""
+        async with self._get_lock():
+            self._sync_threads()
+            title = (title or "").strip()
+            if not title:
+                raise ValueError("title 不能为空")
+            if parent_thread_id and parent_thread_id not in self._threads:
+                raise KeyError(f"父链路不存在: {parent_thread_id}")
+            now = time.time()
+            thread = ThreadItem(
+                thread_id=self._gen_id(f"{title}|{now}"),
+                title=title[:80],
+                summary=(summary or "").strip(),
+                status="active",
+                parent_thread_id=parent_thread_id,
+                created_at=now,
+                updated_at=now,
+                last_advance_by=(by or "").strip(),
+            )
+            self._threads[thread.thread_id] = thread
+            self._save_threads()
+            return thread
+
+    async def thread_status(
+        self,
+        thread_id: Optional[str] = None,
+        include_archived: bool = False,
+        query: Optional[str] = None,
+    ) -> List[ThreadItem]:
+        """查看链路状态。
+
+        - thread_id 缺省：返回全部链路（默认不含已归档），按 active→interrupted→archived、
+          updated_at 倒序 —— 跨聊天协作的"宏观视图"；
+        - thread_id 指定：返回该链路（含已归档），找不到返回空列表；
+        - query：按标题/摘要关键词过滤（大小写不敏感）。
+        """
+        async with self._get_lock():
+            self._sync_threads()
+            if thread_id:
+                t = self._threads.get(thread_id)
+                return [t] if t else []
+            threads = list(self._threads.values())
+            if not include_archived:
+                threads = [t for t in threads if t.status != "archived"]
+            if query:
+                q = query.strip().lower()
+                threads = [t for t in threads if q in t.title.lower() or q in t.summary.lower()]
+            order = {"active": 0, "interrupted": 1, "archived": 2}
+            threads.sort(key=lambda t: (order.get(t.status, 9), -t.updated_at))
+            return threads
+
+    def _thread_step(self, thread_id: str, text: str, done: bool, by: str, now: float, seq: int) -> Dict[str, Any]:
+        """构造一个步骤节点。step_id 全局唯一（md5(thread|text|by|time)）——
+        多进程并发推进时按 step_id 合并，避免不同写者的同号步骤互相覆盖。"""
+        return {
+            "step_id": hashlib.md5(f"{thread_id}|{text}|{by}|{now}".encode("utf-8")).hexdigest()[:12],
+            "seq": seq,
+            "text": text,
+            "done": bool(done),
+            "at": now,
+            "by": (by or "").strip(),
+        }
+
+    async def thread_advance(self, thread_id: str, note: str, done: bool = False, by: str = "") -> ThreadItem:
+        """推进一条链路：追加一个步骤节点（谁在何时推进了什么）。聊天 B~F 各自推进协作。"""
+        async with self._get_lock():
+            self._sync_threads()
+            t = self._threads.get(thread_id)
+            if t is None:
+                raise KeyError(f"链路不存在: {thread_id}")
+            note = (note or "").strip()
+            if not note:
+                raise ValueError("note 不能为空")
+            now = time.time()
+            t.steps.append(self._thread_step(
+                thread_id, note[:500], done, by, now, len(t.steps) + 1
+            ))
+            t.updated_at = now
+            if by:
+                t.last_advance_by = by.strip()
+            self._save_threads()
+            return t
+
+    async def thread_interrupt(self, thread_id: str, reason: str = "") -> ThreadItem:
+        """中断一条链路：状态 → interrupted；内容全部保留（永不遗忘），可随时 resume。"""
+        async with self._get_lock():
+            self._sync_threads()
+            t = self._threads.get(thread_id)
+            if t is None:
+                raise KeyError(f"链路不存在: {thread_id}")
+            t.status = "interrupted"
+            t.updated_at = time.time()
+            reason = (reason or "").strip()
+            if reason:
+                t.steps.append(self._thread_step(
+                    thread_id, f"[中断] {reason[:500]}", False, "", time.time(), len(t.steps) + 1
+                ))
+            self._save_threads()
+            return t
+
+    async def thread_archive(self, thread_id: str) -> ThreadItem:
+        """归档一条链路：状态 → archived（不再出现在活跃总览，内容永不遗忘）。"""
+        async with self._get_lock():
+            self._sync_threads()
+            t = self._threads.get(thread_id)
+            if t is None:
+                raise KeyError(f"链路不存在: {thread_id}")
+            t.status = "archived"
+            t.updated_at = time.time()
+            self._save_threads()
+            return t
+
+    async def thread_resume(self, thread_id: str) -> ThreadItem:
+        """恢复一条链路：状态 → active（中断/归档的链路重新开工）。"""
+        async with self._get_lock():
+            self._sync_threads()
+            t = self._threads.get(thread_id)
+            if t is None:
+                raise KeyError(f"链路不存在: {thread_id}")
+            t.status = "active"
+            t.updated_at = time.time()
+            self._save_threads()
+            return t
+
+    async def thread_link(self, child_id: str, parent_id: str) -> bool:
+        """把两条链路串成父子关系（线索链）。返回是否成功。"""
+        async with self._get_lock():
+            self._sync_threads()
+            if child_id not in self._threads or parent_id not in self._threads:
+                raise KeyError("链路不存在")
+            if child_id == parent_id:
+                raise ValueError("不能把自己链接为自己")
+            self._threads[child_id].parent_thread_id = parent_id
+            self._threads[child_id].updated_at = time.time()
+            self._save_threads()
+            return True
+
+    # ================= 配置管理（Agent 可调，管理上下文缓存） =================
+    async def config_get(self, path: Optional[str] = None) -> Any:
+        """查看配置。path 支持点分路径（如 retrieval.top_k / memory.capacity_threshold），
+        缺省返回全量配置。"""
+        async with self._get_lock():
+            self._maybe_reload_config()
+            if not path:
+                return self.cfg
+            node: Any = self.cfg
+            for part in path.split("."):
+                if not isinstance(node, dict) or part not in node:
+                    raise KeyError(f"配置路径不存在: {path}")
+                node = node[part]
+            return node
+
+    async def config_set(self, key_path: str, value: Any) -> Dict[str, Any]:
+        """修改配置：即时生效（热加载语义）+ 原子写回 coral_config.json 持久化。
+
+        管理上下文缓存的入口（容量/阈值/top_k/配额等）。受保护路径：
+        - paths.* / threads.* ：运行时改路径会脱离现有数据目录，禁止；
+        - embedding.* ：换模型/维度需重建向量，请用 migrate_bge.py，禁止；
+        改 memory.capacity_threshold 会立即触发一次容量治理。
+        """
+        async with self._get_lock():
+            self._maybe_reload_config()
+            if key_path == "paths" or key_path.startswith("paths."):
+                raise ValueError("paths.* 不允许运行时修改（会脱离现有数据目录）")
+            if key_path == "threads" or key_path.startswith("threads."):
+                raise ValueError("threads.* 不允许运行时修改（链路文件路径固定）")
+            if key_path == "embedding" or key_path.startswith("embedding."):
+                raise ValueError("embedding.* 不允许运行时修改（换模型/维度需用 migrate_bge.py 重建向量）")
+            parts = key_path.split(".")
+            node: Any = self.cfg
+            for part in parts[:-1]:
+                if not isinstance(node, dict) or part not in node:
+                    raise KeyError(f"配置路径不存在: {key_path}")
+                node = node[part]
+            if not isinstance(node, dict) or parts[-1] not in node:
+                raise KeyError(f"配置路径不存在: {key_path}")
+            old = node[parts[-1]]
+            node[parts[-1]] = value
+
+            # 原子写回配置文件（合并后的完整配置），重启后保持
+            tmp = self.config_path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(self.cfg, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, self.config_path)
+            self._cfg_mtime = self._stat_mtime()
+
+            # 容量阈值变化 -> 立即治理（让"调小容量"当场生效）
+            if key_path == "memory.capacity_threshold":
+                await self._capacity_governance()
+            return {"key_path": key_path, "old": old, "new": value}
+
     # ---------- 熔断（沿用旧版） ----------
     def fuse_check(self, collected_items: List[MemoryItem]) -> bool:
         total = sum(i.token_count for i in collected_items)
@@ -1554,6 +1959,7 @@ class ThreeDogCoral:
             "total": self._count_total(),
             "vectors": len(self.vector_store),
             "capacity_threshold": self.cfg["memory"]["capacity_threshold"],
+            "threads": len(self._threads),   # 推理线索链路（永不遗忘，独立于记忆池）
             "embedder": self.embedder._mode if self.embedder._resolved else self.cfg["embedding"]["embedder"],
         }
 
@@ -1644,6 +2050,222 @@ async def memory_flush() -> Dict[str, Any]:
     await coral.flush()
     s = coral.stats()
     return {"flushed": True, "hot_persisted": moved, "stats": s}
+
+
+# ---------------------------------------------------------------------------
+# 推理线索链路（Thread）工具 —— 跨聊天协作：聊天 A 定宏观路径，B~F 各自推进
+# 链路永不遗忘（独立存储、不参与热度淘汰/容量治理/磁盘配额）。
+# ---------------------------------------------------------------------------
+@register_tool(
+    name="thread_create",
+    description="创建推理线索链路（永不遗忘，不参与热度淘汰）Create a never-forgotten reasoning thread："
+                "聊天 A 用它定宏观路径（标题 + 几句话摘要），其它聊天（B~F）都能看到并各自推进。"
+                "链路存独立文件 memory_data/coral_threads.json，跨会话/跨聊天共享。",
+    parameters={
+        "title": {"type": "string", "required": True, "description": "链路名（短短语）"},
+        "summary": {"type": "string", "required": False, "description": "宏观路径/当前状态（几句话）"},
+        "parent_thread_id": {"type": "string", "required": False, "description": "父链路 ID（把链路串成线索链）"},
+        "by": {"type": "string", "required": False, "description": "创建者标识（如 聊天A）"},
+    },
+)
+async def thread_create(
+    title: str,
+    summary: str = "",
+    parent_thread_id: Optional[str] = None,
+    by: str = "",
+) -> Dict[str, Any]:
+    coral = get_coral()
+    try:
+        t = await coral.thread_create(title, summary=summary, parent_thread_id=parent_thread_id, by=by)
+    except (ValueError, KeyError) as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "thread": coral._thread_view(t)}
+
+
+@register_tool(
+    name="thread_status",
+    description="查看推理线索链路状态 View reasoning thread status："
+                "不带 thread_id 返回全部活跃链路总览（新聊天一进来就知道'到哪了'，跨聊天协作的宏观视图）；"
+                "带 thread_id 返回该链路详情（含步骤推进链）；query 按标题/摘要关键词过滤。",
+    parameters={
+        "thread_id": {"type": "string", "required": False, "description": "指定链路 ID；缺省=全部（默认不含已归档）"},
+        "include_archived": {"type": "boolean", "required": False, "description": "是否包含已归档链路，默认 false"},
+        "query": {"type": "string", "required": False, "description": "按标题/摘要关键词过滤"},
+    },
+)
+async def thread_status(
+    thread_id: Optional[str] = None,
+    include_archived: bool = False,
+    query: Optional[str] = None,
+) -> Dict[str, Any]:
+    coral = get_coral()
+    threads = await coral.thread_status(
+        thread_id=thread_id, include_archived=include_archived, query=query
+    )
+    views = [coral._thread_view(t) for t in threads]
+    if thread_id is not None:
+        return {"ok": True, "count": len(views), "thread": views[0] if views else None}
+    # 总览：标注子链路（线索链树）
+    ids = {v["thread_id"] for v in views}
+    for v in views:
+        v["children"] = [w["thread_id"] for w in views if w.get("parent_thread_id") == v["thread_id"]]
+    return {"ok": True, "count": len(views), "threads": views}
+
+
+@register_tool(
+    name="thread_advance",
+    description="推进一条推理线索链路 Advance a reasoning thread："
+                "追加一个步骤节点（谁在何时推进了什么），并更新链路的最近推进者。"
+                "聊天 B~F 各自推进协作时用它；done=true 表示该步已完成。",
+    parameters={
+        "thread_id": {"type": "string", "required": True, "description": "要推进的链路 ID"},
+        "note": {"type": "string", "required": True, "description": "本次推进的内容/步骤（短语即可）"},
+        "done": {"type": "boolean", "required": False, "description": "是否标记该步完成，默认 false"},
+        "by": {"type": "string", "required": False, "description": "推进者标识（如 聊天B）"},
+    },
+)
+async def thread_advance(
+    thread_id: str,
+    note: str,
+    done: bool = False,
+    by: str = "",
+) -> Dict[str, Any]:
+    coral = get_coral()
+    try:
+        t = await coral.thread_advance(thread_id, note, done=done, by=by)
+    except (ValueError, KeyError) as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "thread": coral._thread_view(t)}
+
+
+@register_tool(
+    name="thread_interrupt",
+    description="中断一条推理线索链路 Interrupt a reasoning thread："
+                "状态 → interrupted，内容全部保留（永不遗忘），可随时 thread_resume 恢复。",
+    parameters={
+        "thread_id": {"type": "string", "required": True, "description": "要中断的链路 ID"},
+        "reason": {"type": "string", "required": False, "description": "中断原因（会记入步骤链）"},
+    },
+)
+async def thread_interrupt(thread_id: str, reason: str = "") -> Dict[str, Any]:
+    coral = get_coral()
+    try:
+        t = await coral.thread_interrupt(thread_id, reason=reason)
+    except (ValueError, KeyError) as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "thread": coral._thread_view(t)}
+
+
+@register_tool(
+    name="thread_archive",
+    description="归档一条推理线索链路 Archive a reasoning thread："
+                "状态 → archived（不再出现在活跃总览，内容永不遗忘，可 thread_resume 恢复）。",
+    parameters={
+        "thread_id": {"type": "string", "required": True, "description": "要归档的链路 ID"},
+    },
+)
+async def thread_archive(thread_id: str) -> Dict[str, Any]:
+    coral = get_coral()
+    try:
+        t = await coral.thread_archive(thread_id)
+    except (ValueError, KeyError) as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "thread": coral._thread_view(t)}
+
+
+@register_tool(
+    name="thread_resume",
+    description="恢复一条推理线索链路 Resume a reasoning thread："
+                "把中断/归档的链路重新置为 active，继续推进。",
+    parameters={
+        "thread_id": {"type": "string", "required": True, "description": "要恢复的链路 ID"},
+    },
+)
+async def thread_resume(thread_id: str) -> Dict[str, Any]:
+    coral = get_coral()
+    try:
+        t = await coral.thread_resume(thread_id)
+    except (ValueError, KeyError) as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "thread": coral._thread_view(t)}
+
+
+@register_tool(
+    name="thread_link",
+    description="把两条推理线索链路串成父子关系（线索链）Link two reasoning threads："
+                "child 链路的 parent_thread_id 指向 parent，形成线索树。",
+    parameters={
+        "child_id": {"type": "string", "required": True, "description": "子链路 ID"},
+        "parent_id": {"type": "string", "required": True, "description": "父链路 ID"},
+    },
+)
+async def thread_link(child_id: str, parent_id: str) -> Dict[str, Any]:
+    coral = get_coral()
+    try:
+        ok = await coral.thread_link(child_id, parent_id)
+    except (ValueError, KeyError) as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": ok}
+
+
+@register_tool(
+    name="coral_stats",
+    description="查看脑珊瑚运行状态 View Coral stats："
+                "热/温/冷记忆池占用、线程数、嵌入器、磁盘占用与配额比例 —— 管理上下文缓存的体检入口。",
+    parameters={},
+)
+async def coral_stats() -> Dict[str, Any]:
+    coral = get_coral()
+    s = coral.stats()
+    try:
+        d = coral.disk_usage()
+    except Exception:  # noqa: BLE001
+        d = {}
+    return {
+        "ok": True,
+        "stats": s,
+        "disk_usage": d,
+        "hint": "调优配置用 coral_config_get / coral_config_set",
+    }
+
+
+@register_tool(
+    name="coral_config_get",
+    description="查看脑珊瑚配置 View Coral config："
+                "支持点分路径（如 memory / retrieval.top_k / storage.max_bytes），"
+                "缺省返回全量配置 —— 管理上下文缓存（容量/阈值/top_k/配额）前先看这里。",
+    parameters={
+        "path": {"type": "string", "required": False, "description": "点分路径（如 memory.capacity_threshold）；缺省=全量"},
+    },
+)
+async def coral_config_get(path: Optional[str] = None) -> Dict[str, Any]:
+    coral = get_coral()
+    try:
+        value = await coral.config_get(path)
+    except KeyError as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "path": path, "config": _to_jsonable(value)}
+
+
+@register_tool(
+    name="coral_config_set",
+    description="修改脑珊瑚配置 Set Coral config（管理上下文缓存的核心入口）："
+                "热加载即时生效 + 原子写回 coral_config.json 持久化。"
+                "常用：memory.capacity_threshold（记忆容量上限，改完立即治理）、"
+                "retrieval.top_k（检索条数）、retrieval.min_score、storage.max_bytes（磁盘配额）。"
+                "禁止修改 paths.* / embedding.* / threads.*（换模型请用 migrate_bge.py）。",
+    parameters={
+        "key_path": {"type": "string", "required": True, "description": "点分路径，如 memory.capacity_threshold"},
+        "value": {"type": ["string", "number", "boolean"], "required": True, "description": "新值"},
+    },
+)
+async def coral_config_set(key_path: str, value: Any) -> Dict[str, Any]:
+    coral = get_coral()
+    try:
+        r = await coral.config_set(key_path, value)
+    except (ValueError, KeyError) as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "key_path": r["key_path"], "old": _to_jsonable(r["old"]), "new": _to_jsonable(r["new"])}
 
 
 # ---------------------------------------------------------------------------

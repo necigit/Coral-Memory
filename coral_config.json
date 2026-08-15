@@ -59,5 +59,8 @@
     "max_bytes": 0,
     "warn_ratio": 0.8,
     "hard_ratio": 0.85
+  },
+  "threads": {
+    "path": "memory_data/coral_threads.json"
   }
 }

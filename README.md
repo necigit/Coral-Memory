@@ -1,7 +1,7 @@
 # 脑珊瑚 · Coral Memory (Brain Coral)
 
 > **A heat-aware persistent memory layer for LLM agents** — 面向 LLM Agent 的记忆层中间件：
-> 三级存储（热/温/冷）、多路融合检索、热度生命周期淘汰、配置热加载、DSH Harness 插件集成。
+> 三级存储（热/温/冷）、多路融合检索、热度生命周期淘汰、配置热加载、推理线索链路（永不遗忘的跨聊天协作）、DSH Harness 插件集成。
 >
 > *Origin: started as a ComfyUI prompt-manager idea, grew into a memory layer. 本来只想管提示词，结果长成了一片珊瑚礁。*
 >
@@ -47,7 +47,7 @@ Shoutout to every open-source maker out there 🌱
 | 玩家问题 | 答案（标注前提与来源） |
 |---|---|
 | **能提升命中率吗？** | **确定性基准下能，真实场景不承诺**。合成语料 + hash 嵌入 + 固定 seed 的基准里：冷启动 0%→100% 有结果、recall@5 与 precision@5 均达 1.0——这是**能力上限演示**，不是典型预期。真实语料/真实模型下命中率大概率更低，随语料分布与模型质量波动；接入前请用自有数据复测（`benchmarks/bench_cross_project.py` 可替换语料重跑） |
-| **能省上下文吗？** | **架构上可行，实际省多少取决于用法**。前提：应用把"全量会话历史"替换为"Top-5 相关记忆"注入——该前提下 200 轮会话原文 ≈ 4900 token → 每次注入 ≈ 126 token（省 ~97%，均为估算值，可复现于 `tests/test_200_turns.py` 的语料）。若应用本来就只带最近几轮对话，记忆层带来的是**长期记忆与个性化**，不是 token 节省；前提不满足则没有任何节省 |
+| **能省上下文吗？** | **理论可行，实测不好说**。省多少取决于用法——前提是把"全量会话历史"替换为"Top-5 相关记忆"注入；但 HARNESS 太强了测不出稳定的效果，大概可能有效哈哈。前提不满足则没有任何节省 |
 | **会越用越卡吗？** | **默认配置下不会**。热度淘汰自动清理低热度旧记忆；实测 2 万条写入 83.7s、检索 12ms/次、stats()≈0ms（本机 8C/16T，hash 嵌入，`stress/stress_20k.py` 可复现）。但延迟随池规模上升：容量调大、单条记忆变长都会变慢——这是**无 ANN 索引的全量打分检索**的固有特性 |
 | **要重新说一遍吗？** | **多数情况下不用**。文本相似度达到阈值（默认 Jaccard ≥ 0.7）时重复偏好自动合并，命中过的记忆热度更高、更难淘汰（200 轮压测实测去重 18 次）。但**换种说法或细节不同就不会合并**，会并存为两条——它不是语义级去重 |
 
@@ -144,6 +144,57 @@ H = 0.4·log2(1+c)/log2(1+scale) + 0.3·exp(-Δt/τ) + 0.3·importance
 python migrate_bge.py   # 修订+重嵌入+重建向量区+检索验证，一步到位
 ```
 
+## 推理线索链路（Thread）—— 永不遗忘的跨聊天协作
+
+> **一句话**：聊天 A 说"我要干啥"（宏观路径），聊天 B/C/D/E/F 各自看到并推进——链路把"到哪了"
+> 用几句话记死，任何聊天一进来 `thread_status` 就知道全局。
+
+**与普通记忆的本质区别**：普通记忆（热/温/冷池）按热度淘汰、超容治理、磁盘配额；
+链路存独立文件 `memory_data/coral_threads.json`，**不参与任何淘汰/治理/配额**——"永不遗忘"。
+每条链路 = 标题（短短语）+ 摘要（宏观路径，可不断更新）+ 步骤链（谁在何时推进了什么，
+每条步骤带全局唯一 `step_id`）+ 父子链接（线索链串联）。
+
+**多进程一致性**（跨聊天的地基）：
+- 变更落盘**节流**（250ms 突发合并，真实操作间隔远大于此，仍即时落盘）+ `flush()`/进程退出强制；
+- 写入用**锁文件**（O_EXCL + 10s stale 检测）串行化多进程写者，`os.replace` 带退避重试（防 Windows 撞文件）；
+- 写前按文件指纹 (mtime+size) 检测外部变更并**按 `step_id` 合并远端步骤**——
+  3 进程并发各推 30 步实测 **90/90 零丢失**（`stress/stress_threads.py` 可复现）；
+- 压测：300 链路 × 20 推进 = 6000 操作 **0.08s**（8 万推进/秒），重启加载完全一致。
+
+**跨聊天协作流程**：
+
+```text
+聊天A: thread_create("发布 v2.0", "升级嵌入模型并优化检索性能", by="聊天A")
+聊天B: thread_status                          # 一进来就看到宏观路径
+聊天B: thread_advance(<thread_id>, "migrate_bge.py 已跑通", done=True, by="聊天B")
+聊天C: thread_status(thread_id=<thread_id>)   # 看到步骤链，接着推进
+聊天C: thread_advance(<thread_id>, "向量重建完成，检索验证通过", by="聊天C")
+聊天A: thread_interrupt(<thread_id>, reason="等上游依赖")   # 暂停
+聊天A: thread_resume(<thread_id>)             # 恢复
+聊天A: thread_archive(<thread_id>)            # 归档（永不遗忘，只是不在活跃总览）
+```
+
+**MCP 工具**（DSH 中为 `mcp__coral__thread_*`）：`thread_create` / `thread_status` /
+`thread_advance` / `thread_interrupt` / `thread_archive` / `thread_resume` / `thread_link`。
+`thread_status` 不带参数返回全部活跃链路总览（含子链路归属），Agent 直接在聊天里渲染成看板。
+
+## 管理上下文缓存（配置工具）
+
+三个 MCP 工具让 Agent/用户在聊天里直接管理记忆层配置（热加载即时生效 + 持久化）：
+
+- `coral_stats()` —— 体检：热/温/冷占用、线程数、磁盘与配额比例；
+- `coral_config_get(path?)` —— 查看配置，支持点分路径（如 `memory.capacity_threshold`）；
+- `coral_config_set(key_path, value)` —— 改配置并原子写回 `coral_config.json`（重启保持）。
+  改 `memory.capacity_threshold` 会立即触发一次容量治理；`retrieval.top_k` / `retrieval.min_score` /
+  `storage.max_bytes` 等随改随生效。**受保护路径**：`paths.*` / `threads.*`（改路径会脱离数据目录）、
+  `embedding.*`（换模型/维度需 `migrate_bge.py` 重建向量）。
+
+```text
+coral_stats()                              # 看占用
+coral_config_set memory.capacity_threshold 2000   # 容量调大
+coral_config_get retrieval.weights         # 查检索权重
+```
+
 ## 存储格式与持久化语义
 
 - 单条记忆 ≈ 文本 JSONL ~250B + 向量 1536B ≈ **1.8KB**（10 万条 ≈ 180MB）；
@@ -232,6 +283,7 @@ curl -X POST http://127.0.0.1:8765/rpc \
 | | `cold_fold_interval_seconds` | 30 | 冷库热度增量落盘节流 |
 | `storage` | `vector_save_interval_seconds` | 5.0 | 向量落盘节流（防 O(n²) 写盘） |
 | | `max_bytes` / `warn_ratio` / `hard_ratio` | 0/0.8/0.85 | 磁盘配额（0 = 不限制） |
+| `threads` | `path` | `memory_data/coral_threads.json` | 推理线索链路存储（永不遗忘，不参与淘汰/治理/配额） |
 | `parallelism` | `embed_batch_window_ms` | 0 | 嵌入合批窗口（真实模型建议 4-8ms） |
 | `reload` | `check_interval_seconds` | 2.0 | 配置 mtime 检测节流 |
 
@@ -249,6 +301,15 @@ curl -X POST http://127.0.0.1:8765/rpc \
 | `fuse_check` | `(items) → bool` | token 熔断（沿用旧版语义） |
 | `_distill` | `(cluster) → MemoryItem \| None` | **可覆写**的 LLM 蒸馏接口，默认占位返回 None |
 | `@register_tool` | 装饰器 | 注册 `memory_search(query, top_k)` / `memory_insert(content, importance)` / `memory_flush()` |
+| `thread_create` | `(title, summary="", parent_thread_id=None, by="") → ThreadItem` | 创建推理线索链路（永不遗忘） |
+| `thread_status` | `(thread_id=None, include_archived=False, query=None) → List[ThreadItem]` | 查看链路：无参=活跃总览；指定 ID=详情含步骤链 |
+| `thread_advance` | `(thread_id, note, done=False, by="") → ThreadItem` | 推进链路（追加步骤节点），聊天间协作 |
+| `thread_interrupt` | `(thread_id, reason="") → ThreadItem` | 中断链路（内容保留，可恢复） |
+| `thread_archive` | `(thread_id) → ThreadItem` | 归档链路（不在活跃总览，永不遗忘） |
+| `thread_resume` | `(thread_id) → ThreadItem` | 恢复中断/归档的链路 |
+| `thread_link` | `(child_id, parent_id) → bool` | 把两条链路串成父子（线索链） |
+| `config_get` | `(path=None) → Any` | 查看配置（点分路径；缺省全量） |
+| `config_set` | `(key_path, value) → dict` | 改配置：热加载生效 + 原子写回配置文件（管理上下文缓存入口） |
 | `memory_flush` | MCP 工具 | **持久化关键**：热区记忆默认只存内存（重启丢失），写重要记忆后调它落盘（温存 + 向量） |
 | `build_dsh_cordis_plugin_js` | `(sidecar_url) → str` | 生成 DSH `harness.registerTool` 插件 JS（含 @Ne 水印） |
 | `MemoryToolSidecar` | `(host, port)` | 极简 HTTP 桥：JS `execute` → `POST /rpc` → Python 注册表 |
@@ -283,7 +344,8 @@ curl -X POST http://127.0.0.1:8765/rpc \
 ```python
 # coral_mcp_server.py —— 手写 MCP stdio 协议，把 @register_tool 注册表桥给任意 MCP 客户端
 # DSH 侧：cordis.patch.yml 注册 @deepseek-ai/dsh-mcp-client（见"自己装上用"），
-#         工具以 mcp__coral__memory_search / mcp__coral__memory_insert / mcp__coral__memory_flush 出现
+#         工具以 mcp__coral__memory_search / mcp__coral__memory_insert / mcp__coral__memory_flush
+#         以及 mcp__coral__thread_*（推理线索链路，跨聊天协作）出现
 ```
 
 > ⚠️ **持久化（重要）**：`memory_insert` 的新记忆先进**内存热区**——进程/重启后丢失（热区不落盘是三级存储的设计）。**写重要记忆后务必调用 `memory_flush`**（把温存 + 向量落盘到 `memory_data/`）。一条建议流程：`memory_insert(内容, importance)` → `memory_flush()`。
