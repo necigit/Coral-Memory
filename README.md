@@ -228,7 +228,7 @@ async def main():
 asyncio.run(main())
 ```
 
-**在 DSH Harness（就是你 / 其它聊天）里用**：不用自己敲 Python——
+**在 DeepSeek Harness / 其他聊天里用**：不用自己敲 Python——
 把本仓库路径或链接发给任意聊天，说一句：
 > "按本仓库 README 的「自己装上用」一节，把 coral 注册为 MCP 工具（`$DSH_HOME/profiles/<profile>/cordis.patch.yml` 加 `mcp-coral` 行，保存即生效）。"
 
