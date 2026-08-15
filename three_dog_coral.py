@@ -79,7 +79,9 @@ __all__ = [
     "load_config",
 ]
 
-DEFAULT_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "coral_config.json")
+# CORAL_CONFIG_PATH：可选覆盖 coral_config.json 路径（部署到受限/只读环境时使用）；
+# 未设置时使用与脚本同目录的默认位置。
+DEFAULT_CONFIG_PATH = os.environ.get("CORAL_CONFIG_PATH") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "coral_config.json")
 
 # 推理线索链路落盘节流（秒）：突发批量操作合并写盘，真实聊天操作（间隔 >> 此值）仍即时落盘
 _THREADS_SAVE_DEBOUNCE = 0.25
