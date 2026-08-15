@@ -168,9 +168,14 @@ def _recursive_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str
 
 
 def load_config(path: Optional[str] = None) -> Dict[str, Any]:
-    """读取 coral_config.json，与默认值深合并；文件缺失/损坏时回退默认。"""
+    """读取 coral_config.json，与默认值深合并；文件缺失/损坏时回退默认。
+
+    注意：必须以 DEFAULT_CONFIG 的**深拷贝**为基底（_recursive_merge 只深合并
+    override 分支，用户配置缺省的段会直接共享 DEFAULT_CONFIG 对象——运行时
+    config_set 会污染模块级默认值，导致"恢复默认"失效）。
+    """
     path = path or DEFAULT_CONFIG_PATH
-    cfg = _recursive_merge(DEFAULT_CONFIG, {})
+    cfg = json.loads(json.dumps(DEFAULT_CONFIG))  # 深拷贝：防止 cfg 与 DEFAULT_CONFIG 共享引用
     if os.path.exists(path):
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -1945,6 +1950,185 @@ class ThreeDogCoral:
                 await self._capacity_governance()
             return {"key_path": key_path, "old": old, "new": value}
 
+    @staticmethod
+    def _default_of(key_path: str) -> Any:
+        """取 DEFAULT_CONFIG 里某点分路径的默认值（不存在则 KeyError）。"""
+        node: Any = DEFAULT_CONFIG
+        for part in key_path.split("."):
+            if not isinstance(node, dict) or part not in node:
+                raise KeyError(f"默认配置路径不存在: {key_path}")
+            node = node[part]
+        return json.loads(json.dumps(node))  # 深拷贝，防止默认值被改
+
+    async def config_reset(self, key_path: Optional[str] = None) -> Dict[str, Any]:
+        """恢复默认配置（**不清空任何缓存文件**，记忆数据原样保留）。
+
+        - key_path 缺省：把 memory / retrieval / heat / storage / parallelism / reload
+          整段重置为 DEFAULT_CONFIG 默认值；
+        - key_path 指定：只重置该段/键（如 memory.capacity_threshold）；
+        - paths.* / embedding.* / threads.* 永不重置（防止脱离数据目录、
+          向量维度与模型不匹配）；重置后原子写回配置文件并触发一次容量治理。
+        """
+        async with self._get_lock():
+            self._maybe_reload_config()
+            protected = ("paths", "embedding", "threads")
+            if key_path:
+                top = key_path.split(".")[0]
+                if top in protected:
+                    raise ValueError(f"{top}.* 受保护，不允许重置")
+                # 注意：不能在锁内调用 self.config_get（会重入 asyncio.Lock 死锁），直接遍历
+                parts = key_path.split(".")
+                node: Any = self.cfg
+                for part in parts[:-1]:
+                    if not isinstance(node, dict) or part not in node:
+                        raise KeyError(f"配置路径不存在: {key_path}")
+                    node = node[part]
+                if not isinstance(node, dict) or parts[-1] not in node:
+                    raise KeyError(f"配置路径不存在: {key_path}")
+                old = node[parts[-1]]
+                node[parts[-1]] = self._default_of(key_path)
+                changed = {key_path: {"old": old, "new": node[parts[-1]]}}
+            else:
+                changed = {}
+                for sec in ("memory", "retrieval", "heat", "storage", "parallelism", "reload"):
+                    if sec in DEFAULT_CONFIG and sec in self.cfg:
+                        old = json.loads(json.dumps(self.cfg[sec]))
+                        self.cfg[sec] = self._default_of(sec)
+                        if old != self.cfg[sec]:
+                            changed[sec] = {"old": old, "new": self._default_of(sec)}
+
+            # 原子写回配置文件，重启后保持
+            tmp = self.config_path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(self.cfg, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, self.config_path)
+            self._cfg_mtime = self._stat_mtime()
+            await self._capacity_governance()
+            return {
+                "reset": True,
+                "scope": key_path or "memory/retrieval/heat/storage/parallelism/reload",
+                "changed": changed,
+                "memory_data_untouched": True,
+            }
+
+    async def set_paths(self, paths: Dict[str, str]) -> Dict[str, Any]:
+        """用户自定义缓存路径（GUI 设置页高级区）：校验 + 迁移旧文件 + 写回配置。
+
+        - 只接受 warm_cache / cold_archive / vector_store / vector_index / threads；
+        - 相对路径按"配置所在目录"解析（与桥/MCP 的 CWD 锚定一致，绝不硬编码）；
+        - 旧文件存在且新位置不存在 → os.replace 迁移（数据不丢）；新位置已存在则拒绝（不覆盖）；
+        - 运行中的珊瑚进程（MCP）需重启后完全切换（内存态与 _VectorStore 路径不热切换）。
+        """
+        allowed = {"warm_cache", "cold_archive", "vector_store", "vector_index", "threads"}
+        bad = set(paths) - allowed
+        if bad:
+            raise ValueError(f"不支持的路径键: {sorted(bad)}")
+        async with self._get_lock():
+            self._maybe_reload_config()
+            base = os.path.dirname(os.path.abspath(self.config_path))  # 锚点：配置所在目录
+            old_attrs = {
+                "warm_cache": self.path_warm,
+                "cold_archive": self.path_cold,
+                "vector_store": self.path_vectors,
+                "vector_index": self.path_vector_index,
+                "threads": self.path_threads,
+            }
+            moved = []
+            new_cfg_paths = dict(self.cfg.get("paths", {}))
+            new_threads_path = self.cfg.get("threads", {}).get("path", "memory_data/coral_threads.json")
+            for key, raw in paths.items():
+                if not raw or not isinstance(raw, str):
+                    raise ValueError(f"{key} 的路径为空或非法")
+                new = os.path.abspath(os.path.join(base, raw))
+                old = os.path.abspath(old_attrs[key])
+                if old == new:
+                    continue
+                if os.path.exists(old):
+                    if os.path.exists(new):
+                        raise ValueError(f"新路径已存在文件，拒绝覆盖: {new}")
+                    os.makedirs(os.path.dirname(new) or base, exist_ok=True)
+                    os.replace(old, new)
+                    moved.append({"key": key, "from": old, "to": new})
+                if key == "threads":
+                    new_threads_path = new
+                else:
+                    new_cfg_paths[key] = new
+            # 写回配置（原子）
+            self.cfg["paths"] = new_cfg_paths
+            self.cfg.setdefault("threads", {})["path"] = new_threads_path
+            tmp = self.config_path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(self.cfg, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, self.config_path)
+            self._cfg_mtime = self._stat_mtime()
+            return {
+                "ok": True,
+                "moved": moved,
+                "restart_required": True,
+                "note": "路径已更新并迁移；运行中的珊瑚进程重启后完全切换",
+            }
+
+    async def report(self) -> Dict[str, Any]:
+        """热度/占用审计报告（GUI 窗口A 的数据源）：
+        stats + 磁盘明细 + 按天分布（近 14 天）+ 淘汰预警 Top5（最低热度）+ 文件路径。"""
+        async with self._get_lock():
+            self._maybe_reload_config()
+            s = self.stats()
+            d = self.disk_usage()
+            cold_items = await self._read_all_cold()
+            all_items = self.hot_memory + self.warm_memory + cold_items
+
+            # 按天分布（近 14 天 + 更早）
+            from datetime import datetime, timedelta
+
+            today = datetime.now()
+            days = [(today - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(13, -1, -1)]
+            buckets = {day: 0 for day in days}
+            earlier = 0
+            for m in all_items:
+                day = datetime.fromtimestamp(m.timestamp).strftime("%Y-%m-%d")
+                if day in buckets:
+                    buckets[day] += 1
+                else:
+                    earlier += 1
+
+            # 淘汰预警 Top5：池内按最大访问数归一化的最低热度
+            pool_max = max((m.access_count for m in all_items), default=0)
+            def _loc(m: MemoryItem) -> str:
+                if m in self.hot_memory:
+                    return "hot"
+                if m in self.warm_memory:
+                    return "warm"
+                return "cold"
+
+            coldest = sorted(all_items, key=lambda m: self._heat_score(m, pool_max))[:5]
+            eviction_preview = [
+                {
+                    "id": m.item_id,
+                    "content": (m.content[:60] + "…") if len(m.content) > 60 else m.content,
+                    "heat": round(self._heat_score(m, pool_max), 4),
+                    "access_count": m.access_count,
+                    "importance": m.importance,
+                    "days_old": round((time.time() - m.timestamp) / 86400.0, 1),
+                    "location": _loc(m),
+                }
+                for m in coldest
+            ]
+            return {
+                "stats": s,
+                "disk_usage": d,
+                "day_histogram": {"last_14_days": buckets, "earlier": earlier, "total": len(all_items)},
+                "eviction_preview": eviction_preview,
+                "paths": {
+                    "warm": os.path.abspath(self.path_warm),
+                    "cold": os.path.abspath(self.path_cold),
+                    "vectors": os.path.abspath(self.path_vectors),
+                    "vector_index": os.path.abspath(self.path_vector_index),
+                    "threads": os.path.abspath(self.path_threads),
+                    "config": os.path.abspath(self.config_path),
+                },
+            }
+
     # ---------- 熔断（沿用旧版） ----------
     def fuse_check(self, collected_items: List[MemoryItem]) -> bool:
         total = sum(i.token_count for i in collected_items)
@@ -2266,6 +2450,39 @@ async def coral_config_set(key_path: str, value: Any) -> Dict[str, Any]:
     except (ValueError, KeyError) as exc:
         return {"ok": False, "error": str(exc)}
     return {"ok": True, "key_path": r["key_path"], "old": _to_jsonable(r["old"]), "new": _to_jsonable(r["new"])}
+
+
+@register_tool(
+    name="coral_config_reset",
+    description="恢复脑珊瑚默认配置 Reset Coral config to defaults（**不清空任何缓存文件**，记忆数据原样保留）："
+                "把 memory/retrieval/heat/storage/parallelism/reload 整段（或指定 key_path 单段/键）重置为默认值，"
+                "原子写回 coral_config.json 并触发一次容量治理；paths.* / embedding.* / threads.* 受保护永不重置。",
+    parameters={
+        "key_path": {"type": "string", "required": False, "description": "只重置指定段/键（如 memory.capacity_threshold）；缺省=全部可重置段"},
+    },
+)
+async def coral_config_reset(key_path: Optional[str] = None) -> Dict[str, Any]:
+    coral = get_coral()
+    try:
+        r = await coral.config_reset(key_path)
+    except (ValueError, KeyError) as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, **r}
+
+
+@register_tool(
+    name="coral_report",
+    description="脑珊瑚热度/占用审计报告 Coral health report："
+                "stats + 磁盘明细 + 按天分布（近 14 天）+ 淘汰预警 Top5（最低热度冷记忆）+ 缓存文件路径 —— GUI 统计窗口的数据源。",
+    parameters={},
+)
+async def coral_report() -> Dict[str, Any]:
+    coral = get_coral()
+    try:
+        r = await coral.report()
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    return {"ok": True, **r}
 
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,5 @@
+# 脑珊瑚 GUI bundle patch：把 coral 设置面板挂进 profile 层栈。
+# 行 id 与配置覆盖都在 profile 的 patch 行里按同 id 生效。
+- insert:
+    - id: coral-gui
+      name: '@dsh-external/dsh-client-coral'

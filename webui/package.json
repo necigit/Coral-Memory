@@ -1,0 +1,37 @@
+{
+  "name": "@dsh-external/dsh-client-coral",
+  "version": "0.1.0",
+  "description": "脑珊瑚 Coral — 记忆缓存管理设置面板（DSH 插件）：统计窗口（占用/按天分布/淘汰预警/路径）+ 设置窗口（容量/检索/配额，保存确认 + 恢复默认）。作者：Mr. Code Muggle (@Ne)。",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "bridge.py",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "scripts": {
+    "test:bridge": "python -X utf8 bridge.py report"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-locale"
+      ],
+      "platform": "web"
+    }
+  },
+  "license": "MIT"
+}

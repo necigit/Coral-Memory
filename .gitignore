@@ -16,7 +16,14 @@ coral_vector_index.json
 # 测试/基准产物
 test_report.json
 tests/_tmp_threads/
+tests/_tmp_cfg/
 stress/_tmp_stress_threads/
+
+# 本地截图/临时素材（含敏感 UI 截图，不进 Git）
+_screenshots/
+
+# GUI 插件配置备份（回滚用，不进 Git）
+webui/_backup/
 
 # MCP 调试日志/临时文件
 .mcp_started

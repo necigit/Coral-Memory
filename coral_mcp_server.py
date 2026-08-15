@@ -26,6 +26,12 @@ import sys
 import threading
 import time
 
+# 离线优先：嵌入模型从本地缓存加载，不联网校验。
+# 本机 HF 网络不可靠，联网重试会让首次工具调用挂起数分钟（甚至失败）。
+# 需要联网下载模型时，显式设 HF_HUB_OFFLINE=0 / TRANSFORMERS_OFFLINE=0 再启动。
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+
 # 让珊瑚配置/数据路径与脚本所在目录绑定，无论 DSH 从哪个 cwd 拉起本进程
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(_SCRIPT_DIR)
