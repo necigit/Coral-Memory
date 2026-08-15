@@ -30,8 +30,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "test:bridge": "python -X utf8 bridge.py report",
-    "prepack": "node scripts/sync-runtime.mjs"
+    "test:bridge": "python -X utf8 bridge.py report"
   },
   "dsh": {
     "bundle": {
