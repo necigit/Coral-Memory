@@ -1,5 +1,21 @@
-# 脑珊瑚 GUI bundle patch：把 coral 设置面板挂进 profile 层栈。
+# 脑珊瑚 coral-memory bundle patch：一条命令同时提供 MCP 记忆工具 + GUI 设置面板。
 # 行 id 与配置覆盖都在 profile 的 patch 行里按同 id 生效。
 - insert:
     - id: coral-gui
-      name: '@dsh-external/dsh-client-coral'
+      name: 'coral-memory'
+      # host 插件（lib/index.js）在 apply 时 provide coralPaths 服务：
+      #   ctx.coralPaths.pythonCmd   —— Python 解释器可执行文件（含 .exe 后缀或 python3）
+      #   ctx.coralPaths.pythonArgs  —— 完整 argv：解释器前缀参数（py 启动器为 ['-3']）+ coral_mcp_server.py 绝对路径
+      #   ctx.coralPaths.dataDir     —— 记忆数据目录（默认 $DSH_HOME/coral，可用 DSH_CORAL_DATA_DIR 覆盖）
+      # !!js 表达式在行注入完成后求值；下面 mcp-coral 行 inject 该服务，保证先于本行解析。
+    - id: mcp-coral
+      name: '@deepseek-ai/dsh-mcp-client'
+      inject: [coralPaths]
+      config:
+        serverName: coral
+        transport: stdio
+        command: !!js ctx.coralPaths.pythonCmd
+        args: !!js ctx.coralPaths.pythonArgs
+        env:
+          CORAL_DATA_DIR: !!js ctx.coralPaths.dataDir
+        toolCallTimeoutMs: 120000

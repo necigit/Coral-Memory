@@ -1,7 +1,18 @@
 {
-  "name": "@dsh-external/dsh-client-coral",
-  "version": "0.1.0",
-  "description": "脑珊瑚 Coral — 记忆缓存管理设置面板（DSH 插件）：统计窗口（占用/按天分布/淘汰预警/路径）+ 设置窗口（容量/检索/配额，保存确认 + 恢复默认）。作者：Mr. Code Muggle (@Ne)。",
+  "name": "coral-memory",
+  "version": "0.2.0",
+  "description": "脑珊瑚 Coral Memory — 面向 LLM Agent 的热度感知记忆层（DeepSeek Harness 插件）：MCP 记忆工具（memory_search/insert/thread_* 等 16 个）+ 设置面板（统计/容量/检索/配额）。作者：Mr. Code Muggle (@Ne)。",
+  "keywords": [
+    "deepseek",
+    "deepseek-harness",
+    "memory",
+    "agent-memory",
+    "llm",
+    "embedding",
+    "rag",
+    "coral",
+    "brain-coral"
+  ],
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -12,12 +23,15 @@
   },
   "files": [
     "lib",
+    "runtime",
     "bridge.py",
     "cordis.patch.yml",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
-    "test:bridge": "python -X utf8 bridge.py report"
+    "test:bridge": "python -X utf8 bridge.py report",
+    "prepack": "node scripts/sync-runtime.mjs"
   },
   "dsh": {
     "bundle": {
@@ -32,6 +46,9 @@
       ],
       "platform": "web"
     }
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
   },
   "license": "MIT"
 }

@@ -22,17 +22,21 @@ import traceback
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
-# 让 three_dog_coral 可从珊瑚仓库根目录导入（本脚本在 webui/ 下）
-_CORAL_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _CORAL_ROOT not in sys.path:
-    sys.path.insert(0, _CORAL_ROOT)
+# 让 three_dog_coral 可导入：开发仓库根（webui 上一级）或 npm 包内 runtime/（发布形态）都找。
+# 本脚本在 webui/ 下：../ = 仓库根；./runtime/ = 包内运行时副本。
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+_CORAL_ROOT = os.path.dirname(_THIS_DIR)
+_RUNTIME_DIR = os.path.join(_THIS_DIR, "runtime")
+for _P in (_RUNTIME_DIR, _CORAL_ROOT):
+    if _P not in sys.path:
+        sys.path.insert(0, _P)
 
-# 关键：把进程 CWD 锚定到珊瑚仓库根目录。
-# coral_config.json 里的 paths 是相对路径（memory_data/...），按 CWD 解析；
-# GUI host 从 DSH 进程（cwd 是 J:\deepseek-harness-master）spawn 本脚本时，
-# 不锚定会让缓存落到错误目录、甚至把 memory_data 种进 DSH 源码树。
-# 与 coral_mcp_server.py 的 os.chdir(_SCRIPT_DIR) 同一语义：路径永远相对配置所在处。
-os.chdir(_CORAL_ROOT)
+# 关键：把进程 CWD 锚定到记忆数据目录（CORAL_DATA_DIR，host 插件注入），
+# 缺省回退到仓库根（开发形态）。coral_config.json 里的 paths 是相对路径（memory_data/...），
+# 按 CWD 解析；GUI host 从 DSH 进程 spawn 本脚本时，不锚定会让缓存落到错误目录。
+# 与 coral_mcp_server.py 的 chdir 同一语义：路径永远相对配置所在处。
+_DATA_DIR = os.environ.get("CORAL_DATA_DIR") or _CORAL_ROOT
+os.chdir(_DATA_DIR)
 
 from three_dog_coral import get_coral  # noqa: E402
 
