@@ -104,8 +104,14 @@ H = 0.4·log2(1+c)/log2(1+scale) + 0.3·exp(-Δt/τ) + 0.3·importance
 
 ```
 触发：total > capacity + headroom     # headroom = max(10, min(容量/10, 200))，0 可显式覆盖
-步骤：先蒸馏（_distill 可覆写，默认占位）→ 淘汰最低热度至容量
+步骤：先蒸馏（LLM 压缩相似簇，需配置 llm 段；未配置则跳过聚类）→ 淘汰最低热度至容量
 ```
+
+蒸馏：相似记忆簇（Jaccard ≥ `distill_sim_threshold`、簇 ≥ `distill_min_cluster`）交给 LLM 压缩成
+一条 ≤80 字摘要（继承簇的热度/重要性），碎片记忆自动收敛。端点走 OpenAI 兼容
+`/chat/completions`（urllib 零依赖），配置 `llm` 段（见[配置参考](#配置参考coral_configjson)）即启用；
+未配置或调用失败时优雅降级为"不蒸馏"，绝不阻断治理。注意：推理模型（如 deepseek-v4-*）的
+思考过程也占 `max_tokens`，本实现已用 1024 保证摘要必出。
 
 治理余量让超容后的淘汰**批量发生**，而非每次 insert 全量治理（2 万压测：307.8s → 3.4s，90×）。
 
@@ -232,7 +238,7 @@ asyncio.run(main())
 把本仓库路径或链接发给任意聊天，说一句：
 > "按本仓库 README 的「自己装上用」一节，把 coral 注册为 MCP 工具（`$DSH_HOME/profiles/<profile>/cordis.patch.yml` 加 `mcp-coral` 行，保存即生效）。"
 
-新会话即可获得 `mcp__coral__*` 全套工具（记忆检索/插入/落盘 + 推理线索链路 thread_* + 配置管理 coral_config_*）；
+新会话即可获得 `mcp__coral__*` 全套工具（记忆检索/插入/落盘/删除 + 推理线索链路 thread_* + 配置管理 coral_config_*）；
 写重要记忆后记得调 `mcp__coral__memory_flush` 落盘。
 
 ## 自己装上用（DSH Harness，推荐 MCP 方式，实测链路）
@@ -252,8 +258,9 @@ asyncio.run(main())
 #        toolCallTimeoutMs: 120000                 # 首次调用要加载嵌入模型
 
 # 2. DSH 对 cordis.patch.yml 有 HMR：保存即生效，无需重启
-# 3. 开新会话，Agent 直接获得两个工具：
-#    mcp__coral__memory_search / mcp__coral__memory_insert
+# 3. 开新会话，Agent 直接获得工具：
+#    mcp__coral__memory_search / mcp__coral__memory_insert / mcp__coral__memory_delete
+#    （mcp__coral__memory_flush 写重要记忆后调用落盘）
 ```
 
 不用 DSH 也可以：任何 MCP 客户端（Claude Desktop 等）都能以 stdio 方式连接
@@ -273,11 +280,17 @@ curl -X POST http://127.0.0.1:8765/rpc \
 
 ## 配置参考（`coral_config.json`）
 
+> **配置不入库**：本地配置可能含 API key（`llm` 段），已被 `.gitignore` 排除；
+> 仓库只提供无 key 模板 [`coral_config.example.json`](coral_config.example.json)，复制为 `coral_config.json` 后按需修改。
+> 首次运行缺文件时也会自动生成默认配置。
+
 | 段 | 关键项 | 默认 | 说明 |
 |---|---|---|---|
-| `memory` | `capacity_threshold` | 1000 | 记忆总数上限，超限先蒸馏再淘汰 |
+| `memory` | `capacity_threshold` | 10000 | 记忆总数上限，超限先蒸馏再淘汰 |
 | | `governance_headroom` | 0（自动） | 治理余量 `max(10, min(容量/10, 200))` |
-| | `hot_ttl_hours` / `max_hot_entries` / `max_warm_entries` / `max_cold_entries` | 24/50/200/1000 | 三级存储参数 |
+| | `hot_ttl_hours` / `max_hot_entries` / `max_warm_entries` / `max_cold_entries` | 24/50/200/5000 | 三级存储参数 |
+| | `cold_scan_lines` | 2000 | 冷库检索扫描行数（尾部最新；越大检索范围越广） |
+| | `distill_sim_threshold` / `distill_min_cluster` | 0.6/3 | 蒸馏聚类阈值/最小簇大小 |
 | `retrieval` | `weights` | 0.6/0.2/0.2 | 向量/Jaccard/时间 融合权重 |
 | | `top_k` / `tau_days` / `include_cold` / `vectorized_jaccard` | 5/7/True/True | 检索参数 |
 | `heat` | `weights` | 0.4/0.3/0.3 | 频率/最近访问/重要性 |
@@ -285,7 +298,8 @@ curl -X POST http://127.0.0.1:8765/rpc \
 | `storage` | `vector_save_interval_seconds` | 5.0 | 向量落盘节流（防 O(n²) 写盘） |
 | | `max_bytes` / `warn_ratio` / `hard_ratio` | 0/0.8/0.85 | 磁盘配额（0 = 不限制） |
 | `threads` | `path` | `memory_data/coral_threads.json` | 推理线索链路存储（永不遗忘，不参与淘汰/治理/配额） |
-| `parallelism` | `embed_batch_window_ms` | 0 | 嵌入合批窗口（真实模型建议 4-8ms） |
+| `llm` | `base_url` / `api_key` / `model` | 空/空/deepseek-chat | 蒸馏 LLM 端点（OpenAI 兼容）；`base_url`+`api_key` 齐备才启用蒸馏 |
+| `parallelism` | `embed_batch_window_ms` | 8 | 嵌入合批窗口（真实模型建议 4-8ms） |
 | `reload` | `check_interval_seconds` | 2.0 | 配置 mtime 检测节流 |
 
 ## API 参考
@@ -300,8 +314,9 @@ curl -X POST http://127.0.0.1:8765/rpc \
 | `disk_usage` | `() → dict` | 磁盘明细（含配额比例），配额的"账单"接口 |
 | `stats` | `() → dict` | hot/warm/cold/total/vectors（O(1)） |
 | `fuse_check` | `(items) → bool` | token 熔断（沿用旧版语义） |
-| `_distill` | `(cluster) → MemoryItem \| None` | **可覆写**的 LLM 蒸馏接口，默认占位返回 None |
-| `@register_tool` | 装饰器 | 注册 `memory_search(query, top_k)` / `memory_insert(content, importance)` / `memory_flush()` |
+| `_distill` | `(cluster) → MemoryItem \| None` | LLM 蒸馏：相似簇压缩为摘要（配置 `llm` 段即启用；失败/未配置返回 None） |
+| `delete` | `(item_id) → bool` | 按 item_id 从热/温/冷 + 向量库彻底删除（清理错记/残留） |
+| `@register_tool` | 装饰器 | 注册 `memory_search(query, top_k)` / `memory_insert(content, importance)` / `memory_flush()` / `memory_delete(item_id)` |
 | `thread_create` | `(title, summary="", parent_thread_id=None, by="") → ThreadItem` | 创建推理线索链路（永不遗忘） |
 | `thread_status` | `(thread_id=None, include_archived=False, query=None) → List[ThreadItem]` | 查看链路：无参=活跃总览；指定 ID=详情含步骤链 |
 | `thread_advance` | `(thread_id, note, done=False, by="") → ThreadItem` | 推进链路（追加步骤节点），聊天间协作 |

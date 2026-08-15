@@ -18,14 +18,14 @@
     "hot_ttl_hours": 24,
     "max_hot_entries": 50,
     "max_warm_entries": 200,
-    "max_cold_entries": 1000,
+    "max_cold_entries": 5000,
     "token_fuse_threshold": 4000,
-    "capacity_threshold": 1000,
+    "capacity_threshold": 10000,
     "governance_headroom": 0,
     "distill_first": true,
     "distill_sim_threshold": 0.6,
     "distill_min_cluster": 3,
-    "cold_scan_lines": 500
+    "cold_scan_lines": 2000
   },
   "retrieval": {
     "weights": {
@@ -35,7 +35,8 @@
     },
     "top_k": 5,
     "tau_days": 7.0,
-    "min_score": 0.0
+    "min_score": 0.0,
+    "include_cold": true
   },
   "heat": {
     "weights": {
@@ -62,5 +63,10 @@
   },
   "threads": {
     "path": "memory_data/coral_threads.json"
+  },
+  "llm": {
+    "base_url": "",
+    "api_key": "",
+    "model": "deepseek-chat"
   }
 }

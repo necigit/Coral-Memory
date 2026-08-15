@@ -51,6 +51,7 @@ import os
 import re
 import threading
 import time
+import urllib.request
 from dataclasses import asdict, dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable, Dict, List, Optional
@@ -149,6 +150,13 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     # 每次变更原子写盘，读取时按文件 mtime 检测外部变更（多进程/多聊天共享同一份链路）。
     "threads": {
         "path": "memory_data/coral_threads.json",
+    },
+    # 蒸馏 LLM 端点（OpenAI 兼容 /chat/completions；base_url+api_key 齐备时自动启用蒸馏）。
+    # api_key 仅存本机，只用于把相似记忆压缩成摘要，绝不外发。
+    "llm": {
+        "base_url": "",          # 如 https://api.deepseek.com/v1
+        "api_key": "",           # 如 sk-...
+        "model": "deepseek-chat",
     },
 }
 
@@ -983,35 +991,74 @@ class ThreeDogCoral:
             self.vector_store.save()
             self._last_vec_save = time.time()
 
-    # ---------- 蒸馏（占位接口，供后续接入 LLM） ----------
+    # ---------- 蒸馏（LLM 压缩相似记忆；未配置端点时保持占位行为） ----------
     async def _distill(self, cluster: List[MemoryItem]) -> Optional[MemoryItem]:
-        """蒸馏占位：把一批相似记忆压缩为一条摘要。
+        """把一批相似记忆压缩为一条摘要（LLM 压缩）。
 
-        后续接入 LLM 时在这里实现，例如::
+        LLM 端点从配置 `llm` 段读取（OpenAI 兼容 /chat/completions，urllib 零依赖）：
+            "llm": {"base_url": "https://api.deepseek.com/v1",
+                    "api_key": "sk-...",
+                    "model": "deepseek-chat"}
+        未配置 base_url/api_key 时返回 None（保持占位行为，直接进入淘汰阶段）。
 
-            texts = [m.content for m in cluster]
-            summary_text = await self._llm_compress(texts)   # 你的 LLM 客户端
-            return MemoryItem(item_id=self._gen_id(summary_text),
-                              content=summary_text, timestamp=time.time(),
-                              last_access=time.time(),
-                              token_count=self._count_token(summary_text),
-                              access_count=sum(m.access_count for m in cluster),
-                              importance=max(m.importance for m in cluster))
-
-        返回 None 表示本次不蒸馏（占位默认行为），直接进入淘汰阶段。
+        摘要继承簇的热度/重要性；失败或超时自动降级为"不蒸馏"，绝不阻断治理。
         """
-        # TODO: 接入 LLM 压缩。当前为占位实现：不做任何事。
-        return None
+        llm_cfg = self.cfg.get("llm", {})
+        base = str(llm_cfg.get("base_url") or "").strip()
+        api_key = str(llm_cfg.get("api_key") or "").strip()
+        if not base or not api_key or not cluster:
+            return None
+        model = str(llm_cfg.get("model") or "deepseek-chat").strip()
+        texts = [f"- {m.content}" for m in cluster]
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": "你是记忆压缩助手：把相似记忆合并成一条不超过 80 字的摘要，保留关键事实与数字，不要遗漏重要结论。直接输出摘要本身，不要任何思考过程、解释或前缀。"},
+                {"role": "user", "content": "压缩下面这些相似记忆:\n" + "\n".join(texts)},
+            ],
+            "temperature": 0.2,
+            # 推理模型（deepseek-v4-*）的思考过程也占 max_tokens，
+            # 太小会被思考占满导致 content 为空；1024 保证摘要必出。
+            "max_tokens": 1024,
+        }
+        req = urllib.request.Request(
+            base.rstrip("/") + "/chat/completions",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"content-type": "application/json", "authorization": f"Bearer {api_key}"},
+        )
+        try:
+            loop = asyncio.get_running_loop()
+            resp = await loop.run_in_executor(
+                None, lambda: urllib.request.urlopen(req, timeout=30).read()
+            )
+            data = json.loads(resp.decode("utf-8"))
+            summary = data["choices"][0]["message"]["content"].strip()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("蒸馏 LLM 调用失败（%s），跳过本次蒸馏", exc)
+            return None
+        if not summary:
+            return None
+        now = time.time()
+        return MemoryItem(
+            item_id=self._gen_id(summary),
+            content=summary,
+            timestamp=now,
+            last_access=now,
+            token_count=self._count_token(summary),
+            access_count=sum(m.access_count for m in cluster),   # 热度继承
+            importance=max(m.importance for m in cluster),       # 重要性继承
+        )
 
     async def _try_distill(self) -> int:
         """在低热度记忆里找相似簇（Jaccard 并查集），逐簇尝试蒸馏。
 
         返回净减少的条数（簇大小 - 摘要替换占位）。
 
-        优化：占位版 _distill 恒返回 None（未接入 LLM），聚类纯属浪费，
-        此时直接跳过聚类，等用户覆写 _distill 后自动启用。
+        优化：未配置 LLM 端点（base_url/api_key 为空）时蒸馏无意义，
+        直接跳过聚类，等配置 `llm` 段后自动启用。
         """
-        if type(self)._distill is ThreeDogCoral._distill:
+        llm_cfg = self.cfg.get("llm", {})
+        if not str(llm_cfg.get("base_url") or "").strip() or not str(llm_cfg.get("api_key") or "").strip():
             return 0
         mem_cfg = self.cfg["memory"]
         sim_th = float(mem_cfg.get("distill_sim_threshold", 0.6))
@@ -1279,7 +1326,12 @@ class ThreeDogCoral:
         return count
 
     async def _trim_cold_storage(self, max_entries: int):
-        """冷存储超过上限，只保留最新的 N 条；同步裁剪对应向量。"""
+        """冷存储超过上限，按热度裁剪（保留热度最高的 N 条），同步裁剪对应向量。
+
+        旧版按写入顺序保留最新 N 条（纯 FIFO，不看价值）——旧的重要记忆会被无脑裁掉；
+        新版合并未落盘热度增量后按热度分排序，保留热度最高的 N 条：
+        高频/重要/最近访问的记忆留在冷库，真正冷门的先被淘汰。
+        """
         if self._cold_count <= max_entries:
             return
         if not os.path.exists(self.path_cold):
@@ -1291,27 +1343,33 @@ class ThreeDogCoral:
                 lines = f.readlines()
             if len(lines) <= max_entries:
                 return ([], [])
-            kept_lines = lines[-max_entries:]
-            removed_ids: List[str] = []
-            for ln in lines[: len(lines) - max_entries]:
-                try:
-                    removed_ids.append(json.loads(ln.strip())["item_id"])
-                except Exception:  # noqa: BLE001
-                    continue
-            kept_ids: List[str] = []
-            kept: List[str] = []
-            for ln in kept_lines:
+            # 解析为 MemoryItem（合并未落盘热度增量），按热度升序排列
+            items: List[MemoryItem] = []
+            bad_lines: List[str] = []
+            for ln in lines:
                 line = ln.strip()
                 if not line:
                     continue
                 try:
-                    rec = json.loads(line)
-                    kept_ids.append(rec.get("item_id", ""))
-                    kept.append(json.dumps(self._merge_cold_bump(rec), ensure_ascii=False) + "\n")
+                    m = MemoryItem(**json.loads(line))
+                    if m.item_id in self._cold_stat_bumps:
+                        m.access_count += self._cold_stat_bumps[m.item_id]
+                        m.last_access = max(m.last_access, self._cold_last_access[m.item_id])
+                    items.append(m)
                 except Exception:  # noqa: BLE001
-                    kept.append(ln)
+                    bad_lines.append(ln)
+            if not items:
+                return ([], [])
+            items.sort(key=lambda m: self._heat_score(m))
+            # 淘汰热度最低的（len - max_entries）条，保留热度最高的 max_entries 条
+            doomed = items[: len(items) - max_entries]
+            kept = items[len(items) - max_entries:]
+            removed_ids = [m.item_id for m in doomed]
+            kept_ids = [m.item_id for m in kept]
+            lines_out = [json.dumps(asdict(m), ensure_ascii=False) + "\n" for m in kept]
+            lines_out.extend(bad_lines)  # 坏行原样保留，绝不丢数据
             with open(self.path_cold, "w", encoding="utf-8") as f:
-                f.writelines(kept)
+                f.writelines(lines_out)
             return (removed_ids, kept_ids)
 
         removed_ids, kept_ids = await loop.run_in_executor(None, trim)
@@ -1533,6 +1591,48 @@ class ThreeDogCoral:
             for m, v in zip(missing, vecs):
                 self.vector_store.upsert(m.item_id, v)
         return cold_items
+
+    # ---------- 删除 ----------
+    async def delete(self, item_id: str) -> bool:
+        """按 item_id 删除一条记忆（热/温/冷 + 向量库）。返回是否找到并删除。"""
+        async with self._get_lock():
+            self._maybe_reload_config()
+            found = False
+            # 热区
+            before = len(self.hot_memory)
+            self.hot_memory = [m for m in self.hot_memory if m.item_id != item_id]
+            found = found or len(self.hot_memory) != before
+            # 温区
+            before = len(self.warm_memory)
+            self.warm_memory = [m for m in self.warm_memory if m.item_id != item_id]
+            found = found or len(self.warm_memory) != before
+            # 冷区（存在同名行才算找到）
+            if os.path.exists(self.path_cold):
+                def count_hits() -> int:
+                    hits = 0
+                    with open(self.path_cold, "r", encoding="utf-8") as f:
+                        for ln in f:
+                            line = ln.strip()
+                            if not line:
+                                continue
+                            try:
+                                if json.loads(line).get("item_id") == item_id:
+                                    hits += 1
+                            except Exception:  # noqa: BLE001
+                                continue
+                    return hits
+                loop = asyncio.get_running_loop()
+                hits = await loop.run_in_executor(None, count_hits)
+                if hits:
+                    found = True
+                    await self._rewrite_cold(lambda rec: rec.get("item_id") != item_id)
+            # 向量：内容哈希 id 可能被共享，只有热/温/冷均无引用才删
+            if found and item_id not in {m.item_id for m in self.hot_memory + self.warm_memory}:
+                self.vector_store.drop_many([item_id])
+            if found:
+                await self._save_warm()
+                self._maybe_save_vectors(force=True)
+            return found
 
     # ---------- 用户显式标记重要性 ----------
     async def mark_important(self, item_id: str, importance: float = 1.0) -> bool:
@@ -2234,6 +2334,22 @@ async def memory_flush() -> Dict[str, Any]:
     await coral.flush()
     s = coral.stats()
     return {"flushed": True, "hot_persisted": moved, "stats": s}
+
+
+@register_tool(
+    name="memory_delete",
+    description="按 item_id 删除一条记忆 / Delete a memory by item_id："
+                "从热/温/冷区与向量库彻底移除（清理错记/测试残留）。"
+                "item_id 可从 memory_search / coral_report 的 eviction_preview 获取。",
+    parameters={
+        "item_id": {"type": "string", "required": True, "description": "要删除的记忆 item_id"},
+    },
+)
+async def memory_delete(item_id: str) -> Dict[str, Any]:
+    """删除一条记忆（热/温/冷 + 向量）。"""
+    coral = get_coral()
+    removed = await coral.delete(item_id)
+    return {"ok": removed, "item_id": item_id, "message": "deleted" if removed else "not found"}
 
 
 # ---------------------------------------------------------------------------

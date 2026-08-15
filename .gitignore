@@ -30,6 +30,9 @@ webui/_backup/
 mcp_*.txt
 mcp_*.log
 
+# 本地配置（可能含 API key，绝不入库；仓库只提供无 key 的 coral_config.example.json 模板）
+coral_config.json
+
 # 开发配套（本地保留，不上 GitHub —— 仓库只追踪最小可用面）
 # 注：benchmarks/、tests/、stress/ 已发布——README 里的性能数字必须可复现
 examples/
