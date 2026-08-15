@@ -25,6 +25,22 @@ webui/bridge.py —— 复用 three_dog_coral 的 report / config_get / config_s
 - 纯 JS 零构建：`lib/` 即产物（`__ModuleLoader__` 闭包格式，与 DSH 客户端插件约定一致）
 - 不改 DSH 源码（J:\deepseek-harness-master 全程只读）
 
+## Python 解释器解析（Windows，2026-08-15 修复 spawn python ENOENT）
+
+host 半部不再裸 spawn `python`（曾因启动环境 PATH 不含 python 而报
+"bridge 失败: spawn python ENOENT"）。现在按顺序解析，结果进程内缓存：
+
+1. 环境变量 `DSH_CORAL_PYTHON` —— 显式覆盖，最优先
+2. PATH 逐目录扫描 `python.exe` / `python3.exe`（自动跳过 WindowsApps 的
+   python3 商店占位 stub）
+3. 常见 Windows 安装路径兜底（`C:/Python3xx`、`C:/Program Files/Python3xx`）
+4. Windows `py` 启动器（`py -3`）
+
+找不到时返回带指引的报错（提示安装 Python 或设置 DSH_CORAL_PYTHON）。
+
+注意：改 `lib/index.js`（host 半部）需**重启 dsh web** 生效；
+改 `lib/client.js` 由 HMR 免刷新热更。
+
 ## 安装（一次性）
 
 ```bash
