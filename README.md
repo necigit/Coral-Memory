@@ -64,17 +64,11 @@ Shoutout to every open-source maker out there 🌱
 ## 架构：三级存储与数据流
 
 ```
-                  ┌────────────┐   过期(TTL)   ┌────────────┐
-  insert ──embed──▶   热区     ├──────────────▶│    温区     │
-                  │ 内存列表   │              │ 内存+JSON   │
-                  └─────┬──────┘              └─────┬──────┘
-                        │ 超 max_hot（LRU 直通）     │ 超 max_warm
-                        ▼                           ▼
-                  ┌─────────────────────────────────────┐
-                  │   冷区：coral_cold.jsonl（追加写）     │
-                  │   检索只读尾部最新 N 行（流式读）      │
-                  └─────────────────────────────────────┘
-                  向量区：coral_vectors.npy（独立并行维护）
+insert → embed → 热区（内存列表） →（TTL 过期）→ 温区（内存 + JSON） →（超 max_warm）→ 冷区
+热区超 max_hot 时直接 LRU 落冷（不经温区，避免中间层堆积）
+
+冷区：coral_cold.jsonl（追加写；检索只读尾部最新 N 行，流式读）
+向量区：coral_vectors.npy（float32 矩阵 + id 索引，与文本并行维护）
 ```
 
 - **热区**（内存）：最快；按 `hot_ttl_hours` 过期进温区；超 `max_hot_entries` 时**直接 LRU 落冷**（不经过温区，避免中间层堆积——沿用旧版踩坑后的设计）；
@@ -233,6 +227,13 @@ async def main():
 
 asyncio.run(main())
 ```
+
+**在 DSH Harness（就是你 / 其它聊天）里用**：不用自己敲 Python——
+把本仓库路径或链接发给任意聊天，说一句：
+> "按本仓库 README 的「自己装上用」一节，把 coral 注册为 MCP 工具（`$DSH_HOME/profiles/<profile>/cordis.patch.yml` 加 `mcp-coral` 行，保存即生效）。"
+
+新会话即可获得 `mcp__coral__*` 全套工具（记忆检索/插入/落盘 + 推理线索链路 thread_* + 配置管理 coral_config_*）；
+写重要记忆后记得调 `mcp__coral__memory_flush` 落盘。
 
 ## 自己装上用（DSH Harness，推荐 MCP 方式，实测链路）
 
