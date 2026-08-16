@@ -1,5 +1,5 @@
 {
-  "name": "coral-memory",
+  "name": "@dsh-external/dsh-client-coral",
   "version": "0.2.0",
   "description": "脑珊瑚 Coral Memory — 面向 LLM Agent 的热度感知记忆层（DeepSeek Harness 插件）：MCP 记忆工具（memory_search/insert/thread_* 等 16 个）+ 设置面板（统计/容量/检索/配额）。作者：Mr. Code Muggle (@Ne)。",
   "keywords": [

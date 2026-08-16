@@ -35,7 +35,23 @@ for _P in (_RUNTIME_DIR, _CORAL_ROOT):
 # 缺省回退到仓库根（开发形态）。coral_config.json 里的 paths 是相对路径（memory_data/...），
 # 按 CWD 解析；GUI host 从 DSH 进程 spawn 本脚本时，不锚定会让缓存落到错误目录。
 # 与 coral_mcp_server.py 的 chdir 同一语义：路径永远相对配置所在处。
-_DATA_DIR = os.environ.get("CORAL_DATA_DIR") or _CORAL_ROOT
+# 修正：host 默认传 $DSH_HOME/coral（常为空 memory_data 目录）；只有目录里确实有
+# 非空的 coral_warm.json（真实数据/配置）才锚定过去，否则回退仓库根——否则 report 读到空数据全 0。
+_DATA_DIR = os.environ.get("CORAL_DATA_DIR") or ""
+
+
+def _has_real_data(d: str) -> bool:
+    w = os.path.join(d, "memory_data", "coral_warm.json")
+    try:
+        return os.path.isfile(w) and os.path.getsize(w) > 0
+    except OSError:
+        return False
+
+
+if _DATA_DIR and _has_real_data(_DATA_DIR):
+    _DATA_DIR = _DATA_DIR
+else:
+    _DATA_DIR = _CORAL_ROOT
 os.chdir(_DATA_DIR)
 
 from three_dog_coral import get_coral  # noqa: E402

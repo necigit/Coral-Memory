@@ -47,3 +47,6 @@ index.html
 chat_history_default.json
 heat_memory.json
 cold_memory.json
+
+# 珊瑚急救模式备份（含服务器完整副本，绝不入库）
+_rescue/

@@ -1,21 +1,8 @@
-# 脑珊瑚 coral-memory bundle patch：一条命令同时提供 MCP 记忆工具 + GUI 设置面板。
-# 行 id 与配置覆盖都在 profile 的 patch 行里按同 id 生效。
+# 脑珊瑚 coral-memory bundle patch：注册 GUI 设置面板（coral-gui）。
+# ⚠️ name 必须用 profile 的链接键 @dsh-external/dsh-client-coral（与既有设置面板插件同款模式）；
+#    包内 package.json 的 name 虽是 coral-memory，但 node_modules 里按链接键解析，
+#    写 coral-memory 会 ERR_MODULE_NOT_FOUND 导致 dsh web 启动崩溃。
+# mcp-coral 由 profile 的 cordis.patch.yml 硬编码路径版提供，这里不重复注册。
 - insert:
     - id: coral-gui
-      name: 'coral-memory'
-      # host 插件（lib/index.js）在 apply 时 provide coralPaths 服务：
-      #   ctx.coralPaths.pythonCmd   —— Python 解释器可执行文件（含 .exe 后缀或 python3）
-      #   ctx.coralPaths.pythonArgs  —— 完整 argv：解释器前缀参数（py 启动器为 ['-3']）+ coral_mcp_server.py 绝对路径
-      #   ctx.coralPaths.dataDir     —— 记忆数据目录（默认 $DSH_HOME/coral，可用 DSH_CORAL_DATA_DIR 覆盖）
-      # !!js 表达式在行注入完成后求值；下面 mcp-coral 行 inject 该服务，保证先于本行解析。
-    - id: mcp-coral
-      name: '@deepseek-ai/dsh-mcp-client'
-      inject: [coralPaths]
-      config:
-        serverName: coral
-        transport: stdio
-        command: !!js ctx.coralPaths.pythonCmd
-        args: !!js ctx.coralPaths.pythonArgs
-        env:
-          CORAL_DATA_DIR: !!js ctx.coralPaths.dataDir
-        toolCallTimeoutMs: 120000
+      name: '@dsh-external/dsh-client-coral'

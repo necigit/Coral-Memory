@@ -9,7 +9,7 @@
  * 纯 JS 直写、零构建：产物直接就是 lib/client.js（__ModuleLoader__ 闭包格式，
  * 与 DSH 客户端插件加载约定一致，见 packages/client/tsdown.client.ts 的产物约定）。
  */
-window.__ModuleLoader__.load({ id: 'coral-memory', factory: (require) => {
+window.__ModuleLoader__.load({ id: '@dsh-external/dsh-client-coral', factory: (require) => {
 var module = { exports: {} }; var exports = module.exports;
 'use strict'
 

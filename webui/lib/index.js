@@ -23,7 +23,7 @@ import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import path, { join } from 'node:path'
 
-export const name = 'coral-memory'
+export const name = '@dsh-external/dsh-client-coral'
 // webServer 由 ctx.inject(['webServer'], ...) 做可选运行时注入（参考 dsh-vision-toolkit/web.ts），
 // logger 是 Cordis 上下文内置服务；二者都不应出现在插件级强制 inject 中，否则会因服务名
 // 大小写不匹配（webserver≠webServer）或非 web profile 缺失而永久 pending。
