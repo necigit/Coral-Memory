@@ -62,6 +62,12 @@ sentence-transformers 降级 hash 嵌入并提示（中文语义检索建议装 
 dsh plugin --profile web remove coral-memory
 ```
 
+## 界面
+
+| 任务栏演示 | 统计窗口 | 设置窗口 |
+|---|---|---|
+| ![任务栏演示](screenshots/taskbar.png) | ![统计窗口](screenshots/settings-main.png) | ![设置窗口](screenshots/settings-config.png) |
+
 ## 本地测试
 
 ```bash
