@@ -21,6 +21,20 @@ Shoutout to every open-source maker out there 🌱
 
 ---
 
+## 功能区
+
+脑珊瑚的 DSH Harness 插件 GUI（设置 →「脑珊瑚 Coral」）三大功能区一览：
+
+| 任务栏演示 | 统计窗口 | 设置窗口 |
+|---|---|---|
+| ![任务栏演示](webui/screenshots/taskbar.png) | ![统计窗口](webui/screenshots/settings-main.png) | ![设置窗口](webui/screenshots/settings-config.png) |
+
+- **任务栏**：推理线索链路（Thread）的看板——活跃链路标题 / 状态 / 步数 / 最近推进者，跨聊天协作的全局视图
+- **统计窗口**：缓存占用（热/温/冷/线程/磁盘）+ 记忆按天分布（近 14 天）+ 即将被淘汰的冷记忆 Top5 + 缓存文件地址
+- **设置窗口**：容量上限 / 检索条数 / 最低分数 / 去重阈值 / 磁盘配额 / 热区保留时长 / 时间衰减，热加载即时生效
+
+---
+
 ## 这是什么 / 不是什么
 
 **是什么**：给 LLM Agent 用的"记忆层"——记住该记住的（你的偏好、说过的话），
@@ -177,6 +191,11 @@ python migrate_bge.py   # 修订+重嵌入+重建向量区+检索验证，一步
 **MCP 工具**（DSH 中为 `mcp__coral__thread_*`）：`thread_create` / `thread_status` /
 `thread_advance` / `thread_interrupt` / `thread_archive` / `thread_resume` / `thread_link`。
 `thread_status` 不带参数返回全部活跃链路总览（含子链路归属），Agent 直接在聊天里渲染成看板。
+
+> **💡 DLC · 大工程协同**：想直接体验"线程即项目中枢"的多聊天并行协作？
+> 仓库自带了指挥官 agent 预设 [`dlc/big-project-coordinator/`](dlc/big-project-coordinator/README.md)——
+> 开场"Hi，有什么大工程要我解决吗？"，自动建链路、拆子任务、派多个子聊天并行推进并写回进度，
+> 任何会话可接手。安装见 DLC 内 README。
 
 ## 管理上下文缓存（配置工具）
 

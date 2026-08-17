@@ -1,0 +1,3 @@
+name: 大工程协同
+description: 指挥官模式：开场"Hi，有什么大工程要我解决吗？"；开工前按「分线档」校准分工强度（珊瑚画像+余额：主模型宽、外部严，无画像则保守），大工程自动建脑珊瑚链路（thread_create）、按校准强度拆解成子任务派给多个子聊天并行推进（subagent + thread_advance 写回），子聊天守协同纪律（边界契约/先查后做/不轮询/认领防重/对不齐防抖），任何会话可 thread_status 接手；需要 mcp__coral__thread_* 工具（coral MCP 已注册时自动可用）。
+order: 10
