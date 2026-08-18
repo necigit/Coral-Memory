@@ -26,7 +26,7 @@ Agent（MCP 工具）            浏览器设置页（lib/client.js, settings.se
 
 - **纯 JS 零构建**：`lib/` 即产物（`__ModuleLoader__` 闭包格式，与 DSH 客户端插件约定一致）
 - **Python 运行时随包分发**：`runtime/` 内置 `three_dog_coral.py` + `coral_mcp_server.py`
-  （`prepack` 自动从仓库根同步最新版本，见 `scripts/sync-runtime.mjs`）
+  （发布时从仓库根同步最新版本）
 - **零配置安装**：host 插件 provide `coralPaths` 服务，按上文「注册 MCP 工具」的 `mcp-coral` 行
   通过 `!!js` 表达式动态读取 Python 解释器 / server 路径 / 数据目录，不写死任何路径
 - 不改 DSH 源码（DeepSeek Harness 全程只读）
@@ -39,8 +39,8 @@ dsh plugin --profile web add coral-memory
 
 # 或本地目录 / tarball / GitHub
 dsh plugin --profile web add ./webui
-dsh plugin --profile web add ./coral-memory-0.2.0.tgz
-dsh plugin --profile web add github:yourname/coral-memory
+dsh plugin --profile web add ./coral-memory-0.3.2.tgz
+dsh plugin --profile web add github:necigit/Coral-Memory
 
 # 重启 dsh web + 刷新页面 → 设置里出现「脑珊瑚 Coral」
 ```
@@ -126,6 +126,5 @@ printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion
   | python -X utf8 runtime/coral_mcp_server.py
 
 # 打包校验
-node scripts/sync-runtime.mjs --check   # runtime/ 与仓库根一致性
-npm pack --dry-run                      # 发布内容预览
+npm pack --dry-run                      # 发布内容预览（runtime 与仓库根一致性由发布流程保证）
 ```

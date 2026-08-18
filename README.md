@@ -312,20 +312,20 @@ curl -X POST http://127.0.0.1:8765/rpc \
 
 | 段 | 关键项 | 默认 | 说明 |
 |---|---|---|---|
-| `memory` | `capacity_threshold` | 10000 | 记忆总数上限，超限先蒸馏再淘汰 |
+| `memory` | `capacity_threshold` | 1000 | 记忆总数上限，超限先蒸馏再淘汰（示例可调大，如 10000） |
 | | `governance_headroom` | 0（自动） | 治理余量 `max(10, min(容量/10, 200))` |
-| | `hot_ttl_hours` / `max_hot_entries` / `max_warm_entries` / `max_cold_entries` | 24/50/200/5000 | 三级存储参数 |
-| | `cold_scan_lines` | 2000 | 冷库检索扫描行数（尾部最新；越大检索范围越广） |
+| | `hot_ttl_hours` / `max_hot_entries` / `max_warm_entries` / `max_cold_entries` | 24/50/200/1000 | 三级存储参数 |
+| | `cold_scan_lines` | 500 | 冷库检索扫描行数（尾部最新；越大检索范围越广） |
 | | `distill_sim_threshold` / `distill_min_cluster` | 0.6/3 | 蒸馏聚类阈值/最小簇大小 |
 | `retrieval` | `weights` | 0.6/0.2/0.2 | 向量/Jaccard/时间 融合权重 |
-| | `top_k` / `tau_days` / `include_cold` / `vectorized_jaccard` | 5/7/True/True | 检索参数 |
+| | `top_k` / `min_score` / `tau_days` / `include_cold` / `vectorized_jaccard` | 3 / 0.35 / 7 / True / True | 检索参数（成本优化默认：3 条足够，min_score 过滤低相关；复杂任务调用时可临时上调 top_k） |
 | `heat` | `weights` | 0.4/0.3/0.3 | 频率/最近访问/重要性 |
 | | `cold_fold_interval_seconds` | 30 | 冷库热度增量落盘节流 |
 | `storage` | `vector_save_interval_seconds` | 5.0 | 向量落盘节流（防 O(n²) 写盘） |
 | | `max_bytes` / `warn_ratio` / `hard_ratio` | 0/0.8/0.85 | 磁盘配额（0 = 不限制） |
 | `threads` | `path` | `memory_data/coral_threads.json` | 推理线索链路存储（永不遗忘，不参与淘汰/治理/配额） |
 | `llm` | `base_url` / `api_key` / `model` | 空/空/deepseek-chat | 蒸馏 LLM 端点（OpenAI 兼容）；`base_url`+`api_key` 齐备才启用蒸馏 |
-| `parallelism` | `embed_batch_window_ms` | 8 | 嵌入合批窗口（真实模型建议 4-8ms） |
+| `parallelism` | `embed_batch_window_ms` | 0（关） | 嵌入合批窗口（真实模型建议 4-8ms；0=关闭，hash 嵌入/调试用） |
 | `reload` | `check_interval_seconds` | 2.0 | 配置 mtime 检测节流 |
 
 ## API 参考
@@ -366,13 +366,12 @@ curl -X POST http://127.0.0.1:8765/rpc \
 | 项目 | 结果（基准条件下） |
 |---|---|
 | 200 轮对话压测（翻译助手 + 20 轮冷却期画像） | 9 次画像、冷却期严格生效、容量精确收敛 |
-| 跨项目共享 | 共享+亲缘度 recall/precision 双 1.0；冷启动 0%→100% |
 | 2 万次暴力压测 | 写入 2 万条 **83.7s**、检索 12ms/次、超容治理批量淘汰、重启一致 ✅ |
 | 并行（8C/16T） | 嵌入合批 3.9×~6.8×、位图 Jaccard 稳态 12-13×、8 路并发检索 6.5× |
 
 ## 适用边界 —— 什么时候它可能变成"负优化"
 
-1. **跨项目无配额共享**：不同领域项目混池 → Top-5 被噪声挤占（precision 1.0 → 0.77 实测）。请用"共享池 + project 亲缘度 + 每项目配额"。
+1. **多领域项目混用同一记忆池**：不同领域内容混池 → Top-K 可能被不相关的高频记忆挤占（检索精度下降）。简单方案：按项目拆成独立实例（各自独立数据目录/配置文件），互不干扰。
 2. **无脑注入上下文**：相关记忆超过 ~5-10 条后边际收益为负。
 3. **用 hash 嵌入冒充语义检索**：哈希嵌入只有词面重合，生产请装 sentence-transformers（中文推荐 bge 系列）。
 4. **小池子激进淘汰**：容量设太低 → recall 塌方。
