@@ -1,23 +1,21 @@
 # 脑珊瑚 · Coral Memory (Brain Coral)
 
-> **A heat-aware persistent memory layer for LLM agents** — 面向 LLM Agent 的记忆层中间件：
-> 三级存储（热/温/冷）、多路融合检索、热度生命周期淘汰、配置热加载、推理线索链路（永不遗忘的跨聊天协作）、DSH Harness 插件集成。
->
-> *Origin: started as a ComfyUI prompt-manager idea, grew into a memory layer. 本来只想管提示词，结果长成了一片珊瑚礁。*
+> **面向 LLM Agent 的持久化记忆层**：三级存储（热/温/冷）、多路融合检索、热度生命周期淘汰、
+> 配置热加载、推理线索链路（跨聊天协作）、DeepSeek Harness 插件集成。
 >
 > **EN**: Coral Memory is a heat-aware persistent memory layer for LLM agents —
 > three-tier storage (hot/warm/cold), multi-fusion retrieval, heat-based lifecycle eviction,
-> config hot-reload, and a zero-dependency MCP stdio bridge so any MCP-capable client
-> (DSH Harness, Claude Desktop, Cline, ...) gets `memory_search` / `memory_insert` tools.
+> config hot-reload, reasoning threads for cross-chat collaboration, and a
+> zero-dependency MCP stdio bridge so any MCP-capable client
+> (DeepSeek Harness, Claude Desktop, Cline, ...) gets `memory_search` / `memory_insert` tools.
 > Embedding models are fetched on first run from HuggingFace — never committed to the repo.
 
 ---
 
-## Author — Mr. Code Muggle (@Ne)
+## 作者 · Author
 
-Mr. Code Muggle — hi guys, I made something fun to play with: fork it, break it, rebuild it — just maybe mention me (lol).
-The coral remembers what I can't. Questions? 📮 751286928@qq.com
-Shoutout to every open-source maker out there 🌱
+**Mr. Code Muggle (@Ne)** — 欢迎 fork、改造、二次发布；保留作者署名即可。
+Questions? 📮 751286928@qq.com
 
 ---
 
@@ -50,7 +48,7 @@ Shoutout to every open-source maker out there 🌱
 
 **起源**：最初只是想管理 ComfyUI 的提示词，做着做着发现
 "提示词管理"的本质是"该记住什么、该忘掉什么、该在什么场景召回什么"，
-越想越离谱，最后长成了一个记忆系统。
+最后演变成一个记忆系统。
 
 ---
 
@@ -61,7 +59,7 @@ Shoutout to every open-source maker out there 🌱
 | 玩家问题 | 答案（标注前提与来源） |
 |---|---|
 | **能提升命中率吗？** | **确定性基准下能，真实场景不承诺**。合成语料 + hash 嵌入 + 固定 seed 的基准里：冷启动 0%→100% 有结果、recall@5 与 precision@5 均达 1.0——这是**能力上限演示**，不是典型预期。真实语料/真实模型下命中率大概率更低，随语料分布与模型质量波动；接入前请用自有数据复测（`benchmarks/bench_cross_project.py` 可替换语料重跑） |
-| **能省上下文吗？** | **理论可行，实测不好说**。省多少取决于用法——前提是把"全量会话历史"替换为"Top-5 相关记忆"注入；但 HARNESS 太强了测不出稳定的效果，大概可能有效哈哈。前提不满足则没有任何节省 |
+| **能省上下文吗？** | **理论可行，效果取决于用法**。省多少取决于用法——前提是把"全量会话历史"替换为"Top-5 相关记忆"注入；实际收益随应用场景而异。前提不满足则没有任何节省 |
 | **会越用越卡吗？** | **默认配置下不会**。热度淘汰自动清理低热度旧记忆；实测 2 万条写入 83.7s、检索 12ms/次、stats()≈0ms（本机 8C/16T，hash 嵌入，`stress/stress_20k.py` 可复现）。但延迟随池规模上升：容量调大、单条记忆变长都会变慢——这是**无 ANN 索引的全量打分检索**的固有特性 |
 | **要重新说一遍吗？** | **多数情况下不用**。文本相似度达到阈值（默认 Jaccard ≥ 0.7）时重复偏好自动合并，命中过的记忆热度更高、更难淘汰（200 轮压测实测去重 18 次）。但**换种说法或细节不同就不会合并**，会并存为两条——它不是语义级去重 |
 
