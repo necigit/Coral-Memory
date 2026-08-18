@@ -25,7 +25,7 @@ Questions? 📮 751286928@qq.com
 
 | 任务栏演示 | 统计窗口 | 设置窗口 |
 |---|---|---|
-| ![任务栏演示](webui/screenshots/taskbar.png) | ![统计窗口](webui/screenshots/settings-main.png) | ![设置窗口](webui/screenshots/settings-config.png) |
+| ![任务栏演示](https://raw.githubusercontent.com/necigit/Coral-Memory/main/webui/screenshots/taskbar.png) | ![统计窗口](https://raw.githubusercontent.com/necigit/Coral-Memory/main/webui/screenshots/settings-main.png) | ![设置窗口](https://raw.githubusercontent.com/necigit/Coral-Memory/main/webui/screenshots/settings-config.png) |
 
 - **任务栏**：推理线索链路（Thread）的看板——活跃链路标题 / 状态 / 步数 / 最近推进者，跨聊天协作的全局视图
 - **统计窗口**：缓存占用（热/温/冷/线程/磁盘）+ 记忆按天分布（近 14 天）+ 即将被淘汰的冷记忆 Top5 + 缓存文件地址

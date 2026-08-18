@@ -110,7 +110,7 @@ dsh plugin --profile web remove coral-memory
 
 | 任务栏演示 | 统计窗口 | 设置窗口 |
 |---|---|---|
-| ![任务栏演示](screenshots/taskbar.png) | ![统计窗口](screenshots/settings-main.png) | ![设置窗口](screenshots/settings-config.png) |
+| ![任务栏演示](https://raw.githubusercontent.com/necigit/Coral-Memory/main/webui/screenshots/taskbar.png) | ![统计窗口](https://raw.githubusercontent.com/necigit/Coral-Memory/main/webui/screenshots/settings-main.png) | ![设置窗口](https://raw.githubusercontent.com/necigit/Coral-Memory/main/webui/screenshots/settings-config.png) |
 
 ## 本地测试
 
