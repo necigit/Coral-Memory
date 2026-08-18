@@ -120,9 +120,9 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     },
     "retrieval": {
         "weights": {"vector": 0.6, "jaccard": 0.2, "time": 0.2},
-        "top_k": 5,
+        "top_k": 3,                      # 默认返回条数（成本优化 2026-08-18：3 条足够，复杂任务调用时上调）
         "tau_days": 7.0,                 # 时间衰减 τ
-        "min_score": 0.0,                # 综合得分下限（0 表示不过滤）
+        "min_score": 0.35,               # 综合得分下限（成本优化 2026-08-18：过滤低相关垃圾注入，0 表示不过滤）
         "include_cold": True,            # 检索是否总是扫描冷库
     },
     "heat": {
@@ -2266,32 +2266,51 @@ def get_coral(config_path: Optional[str] = None) -> ThreeDogCoral:
         return _coral_instance
 
 
+def _search_summary(text: str, limit: int = 100) -> tuple[str, bool]:
+    """检索结果内容瘦身：压平空白 + 截断到 limit 字（本地处理，零 LLM，省输入 token）。
+
+    成本优化 2026-08-18：默认只回传 ≤100 字摘要；需要细节时 memory_search(full=True)。
+    返回 (文本, 是否截断)。
+    """
+    if not text:
+        return "", False
+    flat = " ".join(str(text).split())
+    if len(flat) <= limit:
+        return flat, False
+    return flat[:limit] + "…", True
+
+
 @register_tool(
     name="memory_search",
     description="检索脑珊瑚记忆缓存 / Search the Brain Coral memory cache："
                 "多路融合（向量 0.6 + 关键词 0.2 + 时间衰减 0.2）multi-fusion retrieval "
-                "(vector 0.6 + keyword 0.2 + recency 0.2)，返回 Top-K 相关记忆及得分 (returns Top-K relevant memories with scores).",
+                "(vector 0.6 + keyword 0.2 + recency 0.2)，返回 Top-K 相关记忆及得分 (returns Top-K relevant memories with scores). "
+                "默认 content 已本地瘦身为 ≤100 字摘要（省 token）；需要细节时传 full=true 取完整内容。",
     parameters={
         "query": {"type": "string", "required": True, "description": "查询文本"},
-        "top_k": {"type": "integer", "required": False, "description": "返回条数，默认取配置(5)"},
+        "top_k": {"type": "integer", "required": False, "description": "返回条数，默认取配置(3)"},
+        "full": {"type": "boolean", "required": False, "description": "true=返回完整内容（默认 false=≤100 字摘要）"},
     },
 )
-async def memory_search(query: str, top_k: Optional[int] = None) -> Dict[str, Any]:
+async def memory_search(query: str, top_k: Optional[int] = None, full: bool = False) -> Dict[str, Any]:
     coral = get_coral()
     hits = await coral.search(query, top_k=top_k)
-    return {
-        "query": query,
-        "count": len(hits),
-        "hits": [
-            {
-                "id": h.item_id,
-                "content": h.content,
-                "score": round(float(h.score), 4),
-                "scores": {k: round(float(v), 4) for k, v in h.scores.items()},
-            }
-            for h in hits
-        ],
-    }
+    results: list[dict] = []
+    for h in hits:
+        base = {
+            "id": h.item_id,
+            "score": round(float(h.score), 4),
+            "scores": {k: round(float(v), 4) for k, v in h.scores.items()},
+        }
+        if full:
+            base["content"] = h.content
+            base["truncated"] = False
+        else:
+            summary, truncated = _search_summary(h.content)
+            base["content"] = summary
+            base["truncated"] = truncated
+        results.append(base)
+    return {"query": query, "count": len(hits), "hits": results}
 
 
 @register_tool(
