@@ -31,7 +31,8 @@
     "LICENSE"
   ],
   "scripts": {
-    "test:bridge": "python -X utf8 bridge.py report"
+    "test:bridge": "python -X utf8 bridge.py report",
+    "setup": "node lib/setup.mjs"
   },
   "dsh": {
     "bundle": {

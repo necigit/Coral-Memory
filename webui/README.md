@@ -45,11 +45,25 @@ dsh plugin --profile web add github:yourname/coral-memory
 # 重启 dsh web + 刷新页面 → 设置里出现「脑珊瑚 Coral」
 ```
 
-安装后 GUI 设置面板立即可用；**MCP 记忆工具需额外注册一次**（见下）。
+安装后 GUI 设置面板立即可用；**MCP 记忆工具需注册一次**（见下，一行命令搞定）。
 
 ### 注册 MCP 工具（memory_search 等 16 个）
 
-在 DSH 的 profile 补丁文件 `$DSH_HOME/profiles/<profile>/cordis.patch.yml` 里追加：
+**推荐：幂等 setup 命令**（自动检测、不会重复添加、自动备份）：
+
+```bash
+# 在 DSH profile 目录下（含 node_modules/coral-memory 的地方）
+node node_modules/coral-memory/lib/setup.mjs
+# 或从包内直接跑（npm 安装时）
+node ./node_modules/coral-memory/lib/setup.mjs --profile web
+```
+
+- 自动定位 `$DSH_HOME/profiles/<profile>/cordis.patch.yml`
+- **已存在 coral 的 MCP 注册（serverName: coral / id: mcp-coral）→ 跳过，绝不重复添加**（防 `duplicate loader entry id` 崩溃）
+- 未注册 → 备份原文件（`.bak-时间戳`）后追加**动态版**配置（路径由 `coralPaths` 服务提供，零绝对路径）
+- `--dry-run` 只预览不写入；可重复运行，幂等
+
+**手动方式**（备选）：在 `$DSH_HOME/profiles/<profile>/cordis.patch.yml` 里追加：
 
 ```yaml
 - insert:
