@@ -24,6 +24,7 @@
   "files": [
     "lib",
     "runtime",
+    "screenshots",
     "bridge.py",
     "cordis.patch.yml",
     "README.md",
