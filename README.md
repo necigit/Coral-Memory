@@ -265,14 +265,23 @@ asyncio.run(main())
 #    （coral_mcp_server.py 手写 MCP stdio 协议，不依赖 pip mcp 包）
 
 # 1. 编辑 DSH 配置：$DSH_HOME/profiles/<profile>/cordis.patch.yml 加一条：
-#    - id: mcp-coral
-#      name: '@deepseek-ai/dsh-mcp-client'
-#      config:
-#        serverName: coral
-#        transport: stdio
-#        command: C:/Python313/python.exe          # 改成你的 python 路径
-#        args: ['./coral_mcp_server.py']
-#        toolCallTimeoutMs: 120000                 # 首次调用要加载嵌入模型
+#    （推荐动态版——路径由插件 coralPaths 服务自动提供，无需填绝对路径）
+#    - insert:
+#        - id: mcp-coral
+#          name: '@deepseek-ai/dsh-mcp-client'
+#          inject: [coralPaths]
+#          config:
+#            serverName: coral
+#            transport: stdio
+#            command: !!js ctx.coralPaths.pythonCmd
+#            args: !!js ctx.coralPaths.pythonArgs
+#            env:
+#              CORAL_DATA_DIR: !!js ctx.coralPaths.dataDir
+#            toolCallTimeoutMs: 120000          # 首次调用要加载嵌入模型
+#
+#    ⚠️ 若 cordis.patch.yml 里已有 mcp-coral 行（旧教程/手动配过），不要再加第二行——
+#       重复 entry id 或 serverName 会让 dsh web 启动失败（duplicate loader entry id /
+#       serverName "coral" is already in use）。已存在时沿用旧行，或删掉旧行换上面这版。
 
 # 2. DSH 对 cordis.patch.yml 有 HMR：保存即生效，无需重启
 # 3. 开新会话，Agent 直接获得工具：

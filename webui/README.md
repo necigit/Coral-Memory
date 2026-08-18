@@ -27,7 +27,7 @@ Agent（MCP 工具）            浏览器设置页（lib/client.js, settings.se
 - **纯 JS 零构建**：`lib/` 即产物（`__ModuleLoader__` 闭包格式，与 DSH 客户端插件约定一致）
 - **Python 运行时随包分发**：`runtime/` 内置 `three_dog_coral.py` + `coral_mcp_server.py`
   （`prepack` 自动从仓库根同步最新版本，见 `scripts/sync-runtime.mjs`）
-- **零配置安装**：host 插件 provide `coralPaths` 服务，`cordis.patch.yml` 的 `mcp-coral` 行
+- **零配置安装**：host 插件 provide `coralPaths` 服务，按上文「注册 MCP 工具」的 `mcp-coral` 行
   通过 `!!js` 表达式动态读取 Python 解释器 / server 路径 / 数据目录，不写死任何路径
 - 不改 DSH 源码（DeepSeek Harness 全程只读）
 
@@ -42,8 +42,38 @@ dsh plugin --profile web add ./webui
 dsh plugin --profile web add ./coral-memory-0.2.0.tgz
 dsh plugin --profile web add github:yourname/coral-memory
 
-# 重启 dsh web + 刷新页面 → 设置里出现「脑珊瑚 Coral」，Agent 获得 mcp__coral__* 全套工具
+# 重启 dsh web + 刷新页面 → 设置里出现「脑珊瑚 Coral」
 ```
+
+安装后 GUI 设置面板立即可用；**MCP 记忆工具需额外注册一次**（见下）。
+
+### 注册 MCP 工具（memory_search 等 16 个）
+
+在 DSH 的 profile 补丁文件 `$DSH_HOME/profiles/<profile>/cordis.patch.yml` 里追加：
+
+```yaml
+- insert:
+    - id: mcp-coral
+      name: '@deepseek-ai/dsh-mcp-client'
+      inject: [coralPaths]
+      config:
+        serverName: coral
+        transport: stdio
+        command: !!js ctx.coralPaths.pythonCmd
+        args: !!js ctx.coralPaths.pythonArgs
+        env:
+          CORAL_DATA_DIR: !!js ctx.coralPaths.dataDir
+        toolCallTimeoutMs: 120000
+```
+
+- `inject: [coralPaths]` 表示本行依赖插件提供的 `coralPaths` 服务（Python 解释器 / server 路径 / 数据目录），
+  `!!js` 表达式在服务注入完成后求值——**全程无需填任何 Python / 脚本绝对路径**
+- 保存后 DSH 热加载生效（无需重启）；新会话即可用 `mcp__coral__*` 工具
+
+> ⚠️ **重复注册会崩溃——请先检查再添加**：如果 `cordis.patch.yml` 里**已经存在 `mcp-coral` 行**（例如旧版教程、或你手动配过），**不要再加第二行**。
+> 顶层列表里重复的 entry id 会让 dsh web 启动失败（`duplicate loader entry id: mcp-coral`），同一 `serverName` 也会被拒载
+> （`serverName "coral" is already in use`）。已存在时直接沿用旧行即可，或把旧行删掉换成上面这版。
+> 排查：`dsh --dump-config` 可查看实际生效的条目列表。
 
 ### 环境变量（可选，均有合理默认）
 
