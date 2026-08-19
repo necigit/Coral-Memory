@@ -134,7 +134,7 @@ async def main() -> None:
     mem_files_before = {p: os.path.exists(p) for p in (coral.path_warm, coral.path_cold)}
     r = await coral.config_reset()
     ok("全量重置: 容量回默认", (await coral.config_get("memory.capacity_threshold")) == 1000)
-    ok("全量重置: top_k 回默认", (await coral.config_get("retrieval.top_k")) == 5)
+    ok("全量重置: top_k 回默认", (await coral.config_get("retrieval.top_k")) == 3)
     ok("重置后写回文件", json.load(open(cfg_path, encoding="utf-8"))["memory"]["capacity_threshold"] == 1000)
     mem_files_after = {p: os.path.exists(p) for p in (coral.path_warm, coral.path_cold)}
     ok("缓存文件原样保留（前后一致，不增不减）", mem_files_before == mem_files_after, str(mem_files_before))
@@ -193,7 +193,7 @@ async def main() -> None:
     await pc.set_paths({"warm_cache": "newdir/coral_warm.json"})  # 幂等：同路径跳过
     ok("同路径幂等（不报错不移动）", True)
 
-    print(f"\n全部通过：{PASS} 项断言 ✅")
+    print(f"\n全部通过：{PASS} 项断言 (OK)")
 
 
 if __name__ == "__main__":

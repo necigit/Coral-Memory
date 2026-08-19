@@ -1,5 +1,8 @@
 # 脑珊瑚 Coral Memory —— DeepSeek Harness 插件（webui/）
 
+> **给 LLM Agent 用的"记忆层"**：让它记住你的习惯和说过的话，每次只挑最相关的几条回忆出来用。
+> 三级存储自动新陈代谢、跨聊天协作不丢进度、配置改了即生效。不占上下文窗口，跨会话不丢失。
+
 一条命令装齐 **16 个 MCP 记忆工具 + GUI 设置面板**（作者：@Ne，全部原创，不包含第三方源码）。
 
 - **MCP 工具**（`mcp__coral__*`）：`memory_search` / `memory_insert` / `memory_flush` / `memory_delete`

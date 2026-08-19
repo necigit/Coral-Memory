@@ -622,6 +622,31 @@ def register_tool(
 
 
 # ---------------------------------------------------------------------------
+# 步骤完成语义检测（thread_advance 未显式传 done 时自动识别）
+# 与 DSH 端 coral-board 插件（packages/client/coral-board/src/index.ts）的
+# stepLooksDone 保持同一套词表/否定词，避免「写端不标 done、读端全靠猜」。
+# ---------------------------------------------------------------------------
+_STEP_PENDING_RE = re.compile(
+    r"(?:待|未|尚|还需|仍需|计划|准备|拟|打算|下一步|待办|尚未|暂未|先不)"
+)
+_STEP_COMPLETED_RE = re.compile(
+    r"(?:已|全部|都|已全部)?"
+    r"(?:完成|交付|上线|发布|收官|验收|竣工|完工|收尾|收工|完毕|搞定|落地|解决|定稿|推送)"
+    r"(?:✅|✓|✔|！|!|。)?"
+)
+
+
+def _looks_completed(text: str) -> bool:
+    """一条步骤文本是否读起来像已完成。否定/计划词出现即视为未完成。"""
+    text = (text or "").strip()
+    if not text:
+        return False
+    if _STEP_PENDING_RE.search(text):
+        return False
+    return bool(_STEP_COMPLETED_RE.search(text))
+
+
+# ---------------------------------------------------------------------------
 # 脑珊瑚主类
 # ---------------------------------------------------------------------------
 class ThreeDogCoral:
@@ -1924,8 +1949,12 @@ class ThreeDogCoral:
             "by": (by or "").strip(),
         }
 
-    async def thread_advance(self, thread_id: str, note: str, done: bool = False, by: str = "") -> ThreadItem:
-        """推进一条链路：追加一个步骤节点（谁在何时推进了什么）。聊天 B~F 各自推进协作。"""
+    async def thread_advance(self, thread_id: str, note: str, done: Optional[bool] = None, by: str = "") -> ThreadItem:
+        """推进一条链路：追加一个步骤节点（谁在何时推进了什么）。聊天 B~F 各自推进协作。
+
+        done 三态：True=显式完成；False=显式未完成；None（缺省）=按文本自动识别
+        （含 完成/交付/上线/收官/验收/收工 等完成词且无 待/未/计划 等否定词时置 True）。
+        """
         async with self._get_lock():
             self._sync_threads()
             t = self._threads.get(thread_id)
@@ -1935,6 +1964,8 @@ class ThreeDogCoral:
             if not note:
                 raise ValueError("note 不能为空")
             now = time.time()
+            if done is None:
+                done = _looks_completed(note)
             t.steps.append(self._thread_step(
                 thread_id, note[:500], done, by, now, len(t.steps) + 1
             ))
@@ -2437,18 +2468,20 @@ async def thread_status(
     name="thread_advance",
     description="推进一条推理线索链路 Advance a reasoning thread："
                 "追加一个步骤节点（谁在何时推进了什么），并更新链路的最近推进者。"
-                "聊天 B~F 各自推进协作时用它；done=true 表示该步已完成。",
+                "聊天 B~F 各自推进协作时用它；done=true 表示该步已完成，"
+                "缺省（不传）时自动按文本识别完成语义（含 完成/交付/上线/收官/验收/收工 等词"
+                "且无 待/未/计划 等否定词 → 自动置 done=true）。",
     parameters={
         "thread_id": {"type": "string", "required": True, "description": "要推进的链路 ID"},
         "note": {"type": "string", "required": True, "description": "本次推进的内容/步骤（短语即可）"},
-        "done": {"type": "boolean", "required": False, "description": "是否标记该步完成，默认 false"},
+        "done": {"type": "boolean", "required": False, "description": "是否标记该步完成；缺省=按文本自动识别"},
         "by": {"type": "string", "required": False, "description": "推进者标识（如 聊天B）"},
     },
 )
 async def thread_advance(
     thread_id: str,
     note: str,
-    done: bool = False,
+    done: Optional[bool] = None,
     by: str = "",
 ) -> Dict[str, Any]:
     coral = get_coral()
