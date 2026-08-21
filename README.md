@@ -9,6 +9,14 @@
 
 ---
 
+> ⚠️ **安装前请确认版本（重要）**：DSH 客户端插件的注册方式已变，**请确认你安装/升级的是最新版本**。
+> 新版本中，`coral-board` / `ui-balance`（任务板 / 余额胶囊，独立插件）必须通过 profile 的
+> `cordis.patch.yml` 用 `insert` 注册成 `dsh.client` 行（**不能**放进 `dsh.profile.bundles`），
+> 且 Remote 端点需要 `./typert` 宿主清单，否则 `/api/board/*`、`/api/balance/*` 返回 404。
+> 详见 [`plugins/`](plugins/) 与各插件 README。**本包 `coral-memory` 不含这两个插件**，仅记忆层本体 + GUI。
+
+---
+
 ## 它做了什么
 
 脑珊瑚解决一个问题：**LLM 每次新会话都失忆，用户只能重复交代**。
@@ -35,8 +43,6 @@
 - **设置窗口**：容量 / 检索条数 / 最低分数 / 磁盘配额 / 热区保留时长，热加载即时生效
 
 ---
-
-> ⚠️ **新版本安装变化（重要）**：DSH 客户端插件的注册方式已变。`coral-board` / `ui-balance` 必须通过 profile 的 `cordis.patch.yml` 用 `insert` 注册成 `dsh.client` 行（**不能**放进 `dsh.profile.bundles`），且 Remote 端点需要 `./typert` 宿主清单，否则 `/api/board/*`、`/api/balance/*` 返回 404。详见 [`plugins/`](plugins/) 与各插件 README。
 
 ## 快速开始
 
