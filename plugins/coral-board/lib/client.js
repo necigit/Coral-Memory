@@ -1,4 +1,4 @@
-﻿window.__ModuleLoader__.load({
+window.__ModuleLoader__.load({
 	id: "@deepseek-ai/dsh-client-coral-board",
 	factory: (require) => {
 		var module = { exports: {} };

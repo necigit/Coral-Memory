@@ -1,4 +1,4 @@
-﻿window.__ModuleLoader__.load({
+window.__ModuleLoader__.load({
 	id: "@deepseek-ai/dsh-client-ui-balance",
 	factory: (require) => {
 		var module = { exports: {} };
