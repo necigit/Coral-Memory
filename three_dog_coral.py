@@ -1026,13 +1026,15 @@ class ThreeDogCoral:
             "llm": {"base_url": "https://api.deepseek.com/v1",
                     "api_key": "sk-...",
                     "model": "deepseek-chat"}
-        未配置 base_url/api_key 时返回 None（保持占位行为，直接进入淘汰阶段）。
+        未配置时回退环境变量：base_url ← DEEPSEEK_BASE_URL，api_key ← DEEPSEEK_API_KEY /
+        CORAL_LLM_API_KEY（agent 已持有 DeepSeek key 时无需重复填写）。
+        全部缺省时返回 None（保持占位行为，直接进入淘汰阶段）。
 
         摘要继承簇的热度/重要性；失败或超时自动降级为"不蒸馏"，绝不阻断治理。
         """
         llm_cfg = self.cfg.get("llm", {})
-        base = str(llm_cfg.get("base_url") or "").strip()
-        api_key = str(llm_cfg.get("api_key") or "").strip()
+        base = str(llm_cfg.get("base_url") or os.environ.get("DEEPSEEK_BASE_URL") or "").strip()
+        api_key = str(llm_cfg.get("api_key") or os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("CORAL_LLM_API_KEY") or "").strip()
         if not base or not api_key or not cluster:
             return None
         model = str(llm_cfg.get("model") or "deepseek-chat").strip()
