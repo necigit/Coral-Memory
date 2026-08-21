@@ -36,6 +36,8 @@
 
 ---
 
+> ⚠️ **新版本安装变化（重要）**：DSH 客户端插件的注册方式已变。`coral-board` / `ui-balance` 必须通过 profile 的 `cordis.patch.yml` 用 `insert` 注册成 `dsh.client` 行（**不能**放进 `dsh.profile.bundles`），且 Remote 端点需要 `./typert` 宿主清单，否则 `/api/board/*`、`/api/balance/*` 返回 404。详见 [`plugins/`](plugins/) 与各插件 README。
+
 ## 快速开始
 
 ```bash
