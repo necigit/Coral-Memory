@@ -42,11 +42,16 @@ dsh plugin --profile web add coral-memory
 
 # 或本地目录 / tarball / GitHub
 dsh plugin --profile web add ./webui
-dsh plugin --profile web add ./coral-memory-0.3.2.tgz
+dsh plugin --profile web add ./coral-memory-0.3.4.tgz
 dsh plugin --profile web add github:necigit/Coral-Memory
 
 # 重启 dsh web + 刷新页面 → 设置里出现「脑珊瑚 Coral」
 ```
+
+> ⚠️ **新版本安装变化（重要）**：DSH 客户端插件的注册方式已变。`coral-board` / `ui-balance`（任务板 / 余额胶囊，独立插件）
+> 必须通过 profile 的 `cordis.patch.yml` 用 `insert` 注册成 `dsh.client` 行（**不能**放进 `dsh.profile.bundles`），
+> 且 Remote 端点需要 `./typert` 宿主清单，否则 `/api/board/*`、`/api/balance/*` 返回 404。
+> 本包（coral-memory）不包含这两个插件；需要时见 GitHub 仓库 [`plugins/`](https://github.com/necigit/Coral-Memory/tree/main/plugins) 与各插件 README。
 
 安装后 GUI 设置面板立即可用；**MCP 记忆工具需注册一次**（见下，一行命令搞定）。
 
